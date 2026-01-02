@@ -27,20 +27,14 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add driver_history.txt
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Update driver history: $(date +'%Y-%m-%d')" && git push)
-      
-      - name: Commit and Push changes
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
           
-          # 1. ファイルが存在しない場合に備えて空ファイルを作成（エラー防止）
+          # ファイルが存在しない場合に備えて空ファイルを作成（エラー防止）
           touch driver_history.txt
           
-          # 2. ファイルをステージングに追加
+          # ファイルをステージングに追加
           git add driver_history.txt
           
-          # 3. 差分がある場合のみコミットしてプッシュ
-          # 差分がない場合にエラー（exit code 1）で止まるのを防ぐ記述です
-          git diff --cached --quiet || (git commit -m "Update driver history: $(date +'%Y-%m-%d')" && git push)
+          # 差分がある場合のみコミットしてプッシュ
+          # 差分がない場合に終了コード1で落ちるのを防ぐため、|| true を付けています
+          git commit -m "Update driver history: $(date +'%Y-%m-%d')" || echo "No changes to commit"
+          git push || echo "No changes to push"

@@ -34,8 +34,13 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          # ファイルがなくてもエラーにならないように、空ファイルを作成しておく
-          touch driver_history.txt 
+          
+          # 1. ファイルが存在しない場合に備えて空ファイルを作成（エラー防止）
+          touch driver_history.txt
+          
+          # 2. ファイルをステージングに追加
           git add driver_history.txt
-          # 変更がある場合のみコミット
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Update driver history: $(date +'%Y-%m-%d')" && git push)
+          
+          # 3. 差分がある場合のみコミットしてプッシュ
+          # 差分がない場合にエラー（exit code 1）で止まるのを防ぐ記述です
+          git diff --cached --quiet || (git commit -m "Update driver history: $(date +'%Y-%m-%d')" && git push)

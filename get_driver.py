@@ -1,58 +1,89 @@
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import os
+import json
 
 def update_driver_history():
-    # 2026年現在、GitHub Actionsから遮断されずに叩ける唯一の信頼できるAPI
-    # NVIDIAの公式データを中継して提供しているサービスです
-    api_url = "https://nvidia-driver-update.vercel.app/api/nvidia"
-    
+    # ターゲット: RTX 4060, Win11, Game Ready (DCH)
+    # lid=1(English), lid=1041(Japanese) だが、データの更新が最も早いのは lid=1
+    api_url = "https://www.nvidia.com/Download/API/lookupValueSearch.aspx?typeID=3&psid=127&pfid=956&osid=135&lid=1&isDCH=1&dtcid=1"
     history_file = "driver_history.txt"
+    
+    # セッションと指数バックオフによるリトライ設定
+    session = requests.Session()
+    retries = Retry(
+        total=5, 
+        backoff_factor=2, # 失敗するごとに待ち時間を増やす (2s, 4s, 8s...)
+        status_forcelist=[403, 429, 500, 502, 503, 504]
+    )
+    session.mount('https://', HTTPAdapter(max_retries=retries))
+
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+        "Referer": "https://www.nvidia.com/Download/index.aspx",
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "X-Requested-With": "XMLHttpRequest"
     }
 
     try:
-        # APIを叩く
-        response = requests.get(api_url, headers=headers, timeout=15)
+        print(f"Connecting to NVIDIA API...")
+        response = session.get(api_url, headers=headers, timeout=(10, 30))
         
-        # もし上記が404なら、もう一つの安定したコミュニティAPIを試す
-        if response.status_code != 200:
-            api_url = "https://raw.githubusercontent.com/SvenGau/nvidia-update/main/latest_versions.json"
-            response = requests.get(api_url, headers=headers, timeout=15)
-            response.raise_for_status()
-            data = response.json()
-            # 構造に合わせて抽出
-            version = data.get('windows', {}).get('desktop', {}).get('game_ready', {}).get('version')
-        else:
-            data = response.json()
-            version = data.get('version')
-
-        if not version:
-            print("データソースからバージョンを取得できませんでした。")
+        # 403 Forbidden対策: 
+        # もしActionsのIPが一時的に弾かれた場合、ここで詳細なエラーを出して停止させる
+        response.raise_for_status()
+        
+        # BOM(Byte Order Mark)対策とデコード
+        response.encoding = response.apparent_encoding
+        content = response.text.strip()
+        
+        if not content:
+            print("Error: Empty response from API")
             return
 
-        # ダウンロードURLを構成
-        download_url = f"https://us.download.nvidia.com/Windows/{version}/{version}-desktop-win10-win11-64bit-international-dch-whql.exe"
-        new_entry = f"{version}: {download_url}"
+        data = json.loads(content)
 
-        # 履歴の保存
-        existing_content = ""
+        if not isinstance(data, list) or len(data) == 0:
+            print(f"Warning: Unexpected data format or empty list. Content: {content[:100]}")
+            return
+
+        # 最新バージョンを取得 (APIの[0]番目が通常最新)
+        latest_version = data[0].get('Value')
+        if not latest_version:
+            print("Error: Could not find 'Value' key in API response.")
+            return
+            
+        # URL組み立て (us.download が最も安定)
+        download_url = f"https://us.download.nvidia.com/Windows/{latest_version}/{latest_version}-desktop-win10-win11-64bit-international-dch-whql.exe"
+        new_entry = f"{latest_version}: {download_url}"
+
+        # 履歴ファイルの読み込み (存在しない場合は空)
         if os.path.exists(history_file):
             with open(history_file, "r", encoding="utf-8") as f:
-                existing_content = f.read()
+                history = f.read()
+        else:
+            history = ""
 
-        if version not in existing_content:
+        # 重複チェック (バージョン番号が含まれているか)
+        if latest_version not in history:
+            # 追記モードで保存
             with open(history_file, "a", encoding="utf-8") as f:
                 f.write(new_entry + "\n")
-            print(f"成功: {version} を保存しました。")
+            print(f"SUCCESS: Found new version {latest_version}")
+            # Actionsのステップ間で使えるように環境変数にセット（オプション）
+            if "GITHUB_OUTPUT" in os.environ:
+                with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+                    out.write(f"new_driver=true\nversion={latest_version}\n")
         else:
-            print(f"更新なし: {version} は既に記録済みです。")
+            print(f"NO CHANGE: Version {latest_version} already exists in history.")
 
+    except requests.exceptions.HTTPError as e:
+        print(f"HTTP Error: {e.response.status_code} - Action might be blocked by NVIDIA WAF.")
+    except json.JSONDecodeError:
+        print(f"JSON Parse Error: API returned non-JSON content. Snippet: {response.text[:100]}")
     except Exception as e:
-        # 最終手段：もしAPIがすべてダメなら、最新バージョンを決め打ちして生存確認する
-        print(f"APIアクセス失敗: {e}")
-        print("最新の予測バージョンで直接チェックを試みます...")
-        # (ここには静的なチェックを記述可能ですが、まずは上記で通るはずです)
+        print(f"Unexpected Error: {e}")
 
 if __name__ == "__main__":
     update_driver_history()

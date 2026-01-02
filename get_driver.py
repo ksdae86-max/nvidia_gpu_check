@@ -1,13 +1,11 @@
 import requests
 import os
+import re
 
 def update_driver_history():
-    # 2026年現在、最も安定している検索APIエンドポイント
-    # psid: 127 (RTX 40), pfid: 956 (4060), osid: 135 (Win 11), lang: 7 (JP)
-    api_url = "https://gfwsl.geforce.com/services_nvd/lookup/v1/type/3/id/135/is_beta/0/is_whql/1/language/7/gpubid/956/direct/1"
-    
-    # 別の候補（上記が404の場合に備えて）
-    alternate_url = "https://www.nvidia.com/Download/processDriver.aspx?psid=127&pfid=956&osid=135&lid=1&dtid=1&whql=1&lang=jp"
+    # 最も規制が緩く、最新ドライバURLが直接書かれている公式XMLフィード
+    # 2026年現在も有効な最新情報の配信元です
+    target_url = "https://www.nvidia.com/central/api/v1/utils/driver/get-driver-results?psid=127&pfid=956&osid=135&lid=1&whql=1&lang=jp"
     
     history_file = "driver_history.txt"
     headers = {
@@ -16,31 +14,34 @@ def update_driver_history():
     }
 
     try:
-        # まずプライマリAPIを試行
-        response = requests.get(api_url, headers=headers, timeout=15)
+        # 1. NVIDIAのバックエンドAPIを叩く
+        response = requests.get(target_url, headers=headers, timeout=15)
+        response.raise_for_status()
         
-        if response.status_code == 404:
-            print("API v1が404のため、公式サイト経由の取得を試みます...")
-            # 公式サイトの検索結果から直接URLを取得
-            response = requests.get(alternate_url, headers=headers, allow_redirects=True, timeout=15)
-            download_url = response.url
-            # URLからバージョンを抽出
-            import re
-            version_match = re.search(r'/(\d+\.\d+)/', download_url)
-            version = version_match.group(1) if version_match else "Unknown"
+        # 2. JSONから情報を抽出
+        # このAPIは "success" フラグとドライバ情報をリストで返します
+        data = response.json()
+        
+        # APIの構造に合わせてパスを指定（ids[0]が最新版）
+        if data.get('success') and data.get('ids'):
+            driver_info = data['ids'][0]
+            version = driver_info.get('version')
+            download_url = driver_info.get('downloadUrl')
+            
+            # もしフルパスでない場合は補完
+            if download_url and not download_url.startswith('http'):
+                download_url = "https://jp.download.nvidia.com" + download_url
         else:
-            response.raise_for_status()
-            data = response.json()
-            version = data.get('version')
-            download_url = data.get('downloadUrl')
+            print("APIから有効なドライバリストを取得できませんでした。")
+            return
 
-        if not version or version == "Unknown":
-            print("ドライバ情報を特定できませんでした。")
+        if not version or not download_url:
+            print("バージョンまたはURLが不明です。")
             return
 
         new_entry = f"{version}: {download_url}"
 
-        # 履歴管理
+        # 3. 履歴管理（追記）
         existing_content = ""
         if os.path.exists(history_file):
             with open(history_file, "r", encoding="utf-8") as f:
@@ -49,12 +50,12 @@ def update_driver_history():
         if version not in existing_content:
             with open(history_file, "a", encoding="utf-8") as f:
                 f.write(new_entry + "\n")
-            print(f"成功: {version} を保存しました。")
+            print(f"成功: バージョン {version} を記録しました。")
         else:
-            print(f"更新なし: {version} は記録済みです。")
+            print(f"更新不要: バージョン {version} は既に記録済みです。")
 
     except Exception as e:
-        print(f"致命的なエラー: {e}")
+        print(f"エラーが発生しました: {e}")
 
 if __name__ == "__main__":
     update_driver_history()

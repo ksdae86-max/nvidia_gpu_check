@@ -58,6 +58,14 @@ def update_driver_history():
         download_url = f"https://us.download.nvidia.com/Windows/{latest_version}/{latest_version}-desktop-win10-win11-64bit-international-dch-whql.exe"
         new_entry = f"{latest_version}: {download_url}"
 
+        # --- ブラッシュアップ12: URL生存確認 (HEADリクエスト) ---
+        print(f"Checking URL accessibility: {download_url}")
+        # HEADリクエストはヘッダーのみを取得するため、数GBあるドライバを落とさず一瞬で終わります
+        check_res = session.head(download_url, headers=headers, allow_redirects=True, timeout=10)
+        
+        if check_res.status_code == 200:
+            print("Link is VALID. Proceeding with history update.")
+        
         # 履歴読み込みと保存
         existing = ""
         if os.path.exists(history_file):

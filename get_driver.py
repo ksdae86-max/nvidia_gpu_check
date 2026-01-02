@@ -3,27 +3,37 @@ import os
 import re
 
 def update_driver_history():
-    # Microsoft公式のwingetリポジトリで、NVIDIAドライバの最新バージョンを管理しているディレクトリページ
-    # GitHubのAPIやRawページは、Actionsから100%アクセス可能です
-    search_url = "https://github.com/microsoft/winget-pkgs/tree/master/manifests/n/Nvidia/GeForceDriver/GameReady"
+    # Microsoft wingetリポジトリの特定のディレクトリにあるファイル/フォルダ一覧を取得するAPI
+    # これならHTMLを解析する必要がなく、JSONでフォルダ名（バージョン）が返ってきます
+    api_url = "https://api.github.com/repos/microsoft/winget-pkgs/contents/manifests/n/Nvidia/GeForceDriver/GameReady"
     
     history_file = "driver_history.txt"
-    headers = {"User-Agent": "Mozilla/5.0"}
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/vnd.github.v3+json"
+    }
 
     try:
-        # 1. wingetのリポジトリページを取得
-        response = requests.get(search_url, headers=headers, timeout=15)
+        # 1. APIを叩いてフォルダ一覧を取得
+        response = requests.get(api_url, headers=headers, timeout=15)
         response.raise_for_status()
         
-        # 2. HTMLからバージョン番号（5xx.xx形式）をすべて抽出
-        versions = re.findall(r'(\d{3}\.\d{2})', response.text)
+        items = response.json()
+        
+        # 2. フォルダ名の中から「数字.数字」の形式（例: 566.36）をすべて抽出
+        versions = []
+        for item in items:
+            if item['type'] == 'dir':
+                name = item['name']
+                if re.match(r'^\d{3}\.\d{2}$', name):
+                    versions.append(name)
         
         if not versions:
-            print("wingetリポジトリからバージョンを抽出できませんでした。")
+            print("バージョンフォルダが見つかりませんでした。")
             return
 
-        # 3. 最も大きい数字（最新版）を特定
-        latest_version = sorted(list(set(versions)), reverse=True)[0]
+        # 3. 最大の数値（最新版）を特定
+        latest_version = sorted(versions, reverse=True)[0]
         
         # 4. 公式URLを組み立て
         download_url = f"https://us.download.nvidia.com/Windows/{latest_version}/{latest_version}-desktop-win10-win11-64bit-international-dch-whql.exe"
@@ -44,7 +54,7 @@ def update_driver_history():
             print(f"更新なし: すでに最新 ({latest_version}) を記録済みです。")
 
     except Exception as e:
-        print(f"致命的なエラー: {e}")
+        print(f"エラーが発生しました: {e}")
 
 if __name__ == "__main__":
     update_driver_history()

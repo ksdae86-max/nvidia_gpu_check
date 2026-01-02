@@ -1,1 +1,0 @@
-582.08: https://us.download.nvidia.com/Windows/582.08/582.08-desktop-win10-win11-64bit-international-dch-whql.exe

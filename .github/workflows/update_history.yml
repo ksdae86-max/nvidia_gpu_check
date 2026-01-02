@@ -21,6 +21,8 @@ jobs:
         run: pip install requests
 
       - name: Run update script
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }} # これを追加
         run: python get_driver.py
 
       - name: Commit and Push changes

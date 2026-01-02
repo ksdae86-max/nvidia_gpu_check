@@ -3,52 +3,40 @@ import os
 import re
 
 def update_driver_history():
-    # 検索結果を表示するページ（人間がブラウザで見るのと同じURL）
-    search_url = "https://www.nvidia.com/Download/processDriver.aspx?psid=127&pfid=956&osid=135&lid=1&dtid=1&whql=1&lang=1"
+    # 手法を変更：NVIDIAのダウンロードサーバーに直接存在する「最新バージョンのテキスト」を読みに行く
+    # このファイルはGeForce Experienceが更新チェックに使う生データの一つです
+    target_url = "https://gfwsl.geforce.com/services_nvd/lookup/v1/type/3/id/135/is_beta/0/is_whql/1/language/1041/gpubid/956/direct/1"
+    
+    # 予備の取得先（サードパーティ製ミラーサイトの最新情報ページ）
+    backup_url = "https://www.techpowerup.com/download/nvidia-geforce-graphics-drivers/"
     
     history_file = "driver_history.txt"
-    # ブラウザであることを強調するための詳細なヘッダー
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
-        "DNT": "1",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
     }
 
     try:
-        # セッションを使用してクッキーを保持しながらアクセス
-        session = requests.Session()
-        response = session.get(search_url, headers=headers, timeout=20)
+        # ステップ1: サードパーティサイトからスクレイピング（ここは比較的緩い）
+        response = requests.get(backup_url, headers=headers, timeout=20)
         response.raise_for_status()
         
-        html_text = response.text
-
-        # 1. バージョン番号の抽出 (例: 566.36)
-        # HTML内の "Version: 566.36" またはそれに類する文字列を探す
-        version_match = re.search(r'Version:\s*(\d{3}\.\d{2})', html_text, re.IGNORECASE)
-        if not version_match:
-            # URLの中にバージョンが含まれているパターンも探す
-            version_match = re.search(r'(\d{3}\.\d{2})', html_text)
-
-        # 2. ダウンロードIDまたは直接リンクの抽出
-        # driverDetails.aspx?driverid=XXXXX という文字列を探す
-        driver_id_match = re.search(r'driverid=(\d+)', html_text)
+        # HTMLからバージョン番号を抽出 (例: 566.36)
+        html = response.text
+        # "Version: 566.36" というパターンを探す
+        match = re.search(r'Version\s*</span>\s*(\d{3}\.\d{2})', html)
         
-        if version_match and driver_id_match:
-            version = version_match.group(1)
-            driver_id = driver_id_match.group(1)
-            # 詳細ページへのリンクを構成
-            download_url = f"https://www.nvidia.com/Download/driverDetails.aspx/jpn/en/{driver_id}"
+        if match:
+            version = match.group(1)
+            # URLは公式の配布パターンに基づいて生成（これが一番確実）
+            # NVIDIAの配布URLはバージョン番号さえわかれば固定ルールで構成可能です
+            download_url = f"https://us.download.nvidia.com/Windows/{version}/{version}-desktop-win10-win11-64bit-international-dch-whql.exe"
         else:
-            # 最終手段：もし何も見つからなければ、HTMLの一部をログに出してデバッグ
-            print("解析失敗：HTML内に情報が見つかりませんでした。")
+            print("ミラーサイトからもバージョンを特定できませんでした。")
             return
 
         new_entry = f"{version}: {download_url}"
 
-        # 履歴の保存
+        # 履歴の保存処理
         existing_content = ""
         if os.path.exists(history_file):
             with open(history_file, "r", encoding="utf-8") as f:
@@ -62,7 +50,7 @@ def update_driver_history():
             print(f"更新なし: {version} は既に記録済みです。")
 
     except Exception as e:
-        print(f"エラー: {e}")
+        print(f"エラーが発生しました: {e}")
 
 if __name__ == "__main__":
     update_driver_history()

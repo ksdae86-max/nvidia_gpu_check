@@ -3,42 +3,47 @@ import os
 import re
 
 def update_driver_history():
-    # 公式サイトの検索エンジンが直接使用する、最も原始的で安定したクエリURL
-    # psid=127(RTX40), pfid=956(4060), osid=135(Win11), dtid=1(Game Ready), lang=1(English/US - 最も安定)
-    # ※言語を1(US)にしても、中身は国際版(International)なので日本でも使えます。
-    api_url = "https://www.nvidia.com/Download/processDriver.aspx?psid=127&pfid=956&osid=135&lid=1&dtid=1&whql=1&lang=1"
+    # 検索結果を表示するページ（人間がブラウザで見るのと同じURL）
+    search_url = "https://www.nvidia.com/Download/processDriver.aspx?psid=127&pfid=956&osid=135&lid=1&dtid=1&whql=1&lang=1"
     
     history_file = "driver_history.txt"
+    # ブラウザであることを強調するための詳細なヘッダー
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Referer": "https://www.nvidia.com/Download/index.aspx"
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+        "DNT": "1",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1"
     }
 
     try:
-        # リダイレクトを許可して、最終的なダウンロード先のURLを直接取得する
-        # NVIDIAのこのURLは、アクセスすると即座に「詳細ページ」へ飛ばされます
-        response = requests.get(api_url, headers=headers, timeout=20, allow_redirects=True)
+        # セッションを使用してクッキーを保持しながらアクセス
+        session = requests.Session()
+        response = session.get(search_url, headers=headers, timeout=20)
         response.raise_for_status()
         
-        final_url = response.url
-        print(f"到達URL: {final_url}")
+        html_text = response.text
 
-        # URLからバージョン（例: 566.36）を抽出する
-        # パターン: /566.36/ または 566.36-desktop...
-        version_match = re.search(r'(\d{3}\.\d{2})', final_url)
+        # 1. バージョン番号の抽出 (例: 566.36)
+        # HTML内の "Version: 566.36" またはそれに類する文字列を探す
+        version_match = re.search(r'Version:\s*(\d{3}\.\d{2})', html_text, re.IGNORECASE)
+        if not version_match:
+            # URLの中にバージョンが含まれているパターンも探す
+            version_match = re.search(r'(\d{3}\.\d{2})', html_text)
+
+        # 2. ダウンロードIDまたは直接リンクの抽出
+        # driverDetails.aspx?driverid=XXXXX という文字列を探す
+        driver_id_match = re.search(r'driverid=(\d+)', html_text)
         
-        if version_match:
+        if version_match and driver_id_match:
             version = version_match.group(1)
-            # 実際のダウンロードURLを構成（リダイレクト先URLをそのまま利用）
-            download_url = final_url
-            
-            # もし詳細ページに飛ばされただけなら、さらにURLを整形（もし必要なら）
-            if "driverDetails.aspx" in download_url:
-                # 詳細ページから実際の.exeリンクを推測または抽出が必要だが、
-                # 多くの場合はこのURL自体がバージョン特定に役立つ
-                pass
+            driver_id = driver_id_match.group(1)
+            # 詳細ページへのリンクを構成
+            download_url = f"https://www.nvidia.com/Download/driverDetails.aspx/jpn/en/{driver_id}"
         else:
-            print("URLからバージョンを特定できませんでした。")
+            # 最終手段：もし何も見つからなければ、HTMLの一部をログに出してデバッグ
+            print("解析失敗：HTML内に情報が見つかりませんでした。")
             return
 
         new_entry = f"{version}: {download_url}"

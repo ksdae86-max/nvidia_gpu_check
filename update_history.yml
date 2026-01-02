@@ -1,0 +1,31 @@
+name: Update NVIDIA Driver History
+on:
+  schedule:
+    - cron: '0 0 * * *' # 毎日日本時間の午前9時頃実行
+  workflow_dispatch: # 手動実行ボタンも追加
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # リポジトリへの書き込み権限を許可
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run update script
+        run: python get_driver.py
+
+      - name: Commit and Push changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add driver_history.txt
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update driver history: $(date +'%Y-%m-%d')" && git push)

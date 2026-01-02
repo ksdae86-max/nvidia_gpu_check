@@ -29,3 +29,13 @@ jobs:
           git config --local user.name "GitHub Action"
           git add driver_history.txt
           git diff --quiet && git diff --staged --quiet || (git commit -m "Update driver history: $(date +'%Y-%m-%d')" && git push)
+      
+      - name: Commit and Push changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          # ファイルがなくてもエラーにならないように、空ファイルを作成しておく
+          touch driver_history.txt 
+          git add driver_history.txt
+          # 変更がある場合のみコミット
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update driver history: $(date +'%Y-%m-%d')" && git push)

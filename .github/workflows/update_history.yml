@@ -32,18 +32,19 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           
-          # 1. 最新の状態を取得（コンフリクト防止）
-          git pull origin main --rebase
+          # 1. 念のため最新のmainブランチに合わせる
+          git fetch origin main
+          git checkout main
           
           # 2. Pythonが更新したファイルをステージング
-          # ※ここでは touch しない（Pythonが作った中身を確実に拾うため）
           git add driver_history.txt
           
-          # 3. 差分があるかチェックしてPush
+          # 3. 差分がある時だけコミットして「確実に」mainへPush
           if ! git diff --cached --exit-code; then
-            echo "New version detected. Committing changes..."
+            echo "Changes detected. Pushing to main branch..."
             git commit -m "Update driver history: $(date +'%Y-%m-%d %H:%M')"
-            git push origin main
+            # ここが重要：HEAD（今いる場所）を origin の main へ送る
+            git push origin HEAD:main
           else
-            echo "No new version found in driver_history.txt. Skipping push."
+            echo "No changes detected in driver_history.txt."
           fi

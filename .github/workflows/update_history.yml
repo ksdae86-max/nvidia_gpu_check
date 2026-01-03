@@ -22,34 +22,31 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
-      - name: Prepare Git
+      - name: Prepare Workspace
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git checkout main
           git pull origin main
+          # 以前のゴミ（古いバージョンの記憶）を消去
+          rm -f driver_history.txt
 
       - name: Run update script
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
           python get_driver.py
-          echo "--- DEBUG: Check output ---"
-          # ファイルがある時だけ中身を表示する（エラー防止）
+          echo "--- FINAL VALIDATION ---"
           if [ -f driver_history.txt ]; then
-            ls -l driver_history.txt
             cat driver_history.txt
           else
-            echo "Warning: driver_history.txt was not created."
+            echo "ERROR: File not created."
+            exit 1
           fi
 
-      - name: Commit and Push
+      - name: Force Push to Main
         run: |
-          # ファイルが存在し、中身がある時だけプッシュを試みる
-          if [ -s driver_history.txt ]; then
-            git add driver_history.txt
-            git commit --allow-empty -m "Update driver: $(date +'%Y-%m-%d %H:%M')"
-            git push origin HEAD:main
-          else
-            echo "Nothing to push."
-          fi
+          git add driver_history.txt
+          # 差分に関わらず、最新の状態を強制的に歴史に刻む
+          git commit --allow-empty -m "Verified update: $(date +'%Y-%m-%d %H:%M')"
+          git push origin HEAD:main

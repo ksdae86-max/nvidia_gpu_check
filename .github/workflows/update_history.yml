@@ -2,7 +2,7 @@ name: Update NVIDIA Driver History
 on:
   schedule:
     - cron: '0 0 * * *' # 毎日日本時間の午前9時頃実行
-  workflow_dispatch: # 手動実行ボタンも追加
+  workflow_dispatch: # 手動実行ボタン
 
 jobs:
   build:
@@ -11,7 +11,9 @@ jobs:
       contents: write # リポジトリへの書き込み権限を許可
     steps:
       - uses: actions/checkout@v4
-      
+        with:
+          fetch-depth: 0 # 全履歴を取得してコンフリクトを防止
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -22,7 +24,7 @@ jobs:
 
       - name: Run update script
         env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }} # これを追加
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: python get_driver.py
 
       - name: Commit and Push changes
@@ -30,13 +32,17 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           
-          # ファイルが存在しない場合に備えて空ファイルを作成（エラー防止）
-          touch driver_history.txt
+          # 最新の状態を取得
+          git pull origin main
           
-          # ファイルをステージングに追加
+          # driver_history.txt を確実にステージング
           git add driver_history.txt
           
-          # 差分がある場合のみコミットしてプッシュ
-          # 差分がない場合に終了コード1で落ちるのを防ぐため、|| true を付けています
-          git commit -m "Update driver history: $(date +'%Y-%m-%d')" || echo "No changes to commit"
-          git push || echo "No changes to push"
+          # 変更がある場合のみ実行
+          if ! git diff --cached --exit-code; then
+            git commit -m "Update driver history: $(date +'%Y-%m-%d %H:%M')"
+            git push origin main
+            echo "Changes pushed successfully."
+          else
+            echo "No changes detected. Skipping commit and push."
+          fi

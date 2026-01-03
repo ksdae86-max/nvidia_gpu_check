@@ -8,11 +8,11 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # 確実にリポジトリに書き込むために必須
+      contents: write # リポジトリへの書き込み権限を明示的に許可
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # 履歴をすべて取得（Pushエラー防止）
+          fetch-depth: 0 # 全履歴を取得してPush時のエラーを防ぐ
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -32,16 +32,8 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           
-          # 1. driver_history.txt をステージング
-          git add driver_history.txt
+          # 1. 最新の状態を取得（コンフリクト防止）
+          git pull origin main --rebase
           
-          # 2. 変更がある場合のみ実行
-          if ! git diff --cached --exit-code; then
-            echo "Changes detected. Pushing to repository..."
-            git commit -m "Update driver history: $(date +'%Y-%m-%d %H:%M')"
-            # コンフリクト防止のため Pull してから Push
-            git pull origin main --rebase
-            git push origin main
-          else
-            echo "No changes in driver_history.txt. Nothing to push."
-          fi
+          # 2. Pythonが更新したファイルをステージング
+          # ※ここでは touch し

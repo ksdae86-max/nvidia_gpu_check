@@ -5,10 +5,17 @@ import re
 def send_discord_notification(webhook_url, version, url):
     if not webhook_url: return
     payload = {
-        "username": "NVIDIA Bot",
-        "embeds": [{"title": "🚀 Driver Updated", "description": f"Ver: **{version}**\n[Download]({url})", "color": 7419530}]
+        "username": "NVIDIA Driver Bot",
+        "embeds": [{
+            "title": "🚀 新しいNVIDIAドライバを記録しました",
+            "description": f"バージョン: **{version}**\n[ダウンロードはこちら]({url})",
+            "color": 7419530
+        }]
     }
-    requests.post(webhook_url, json=payload)
+    try:
+        requests.post(webhook_url, json=payload, timeout=10)
+    except:
+        print("Notification failed, but moving on.")
 
 def update_driver_history():
     api_url = "https://www.nvidia.com/Download/processFind.aspx?psid=127&pfid=933&osid=135&lid=1&whql=1&isDCH=1"
@@ -23,25 +30,27 @@ def update_driver_history():
         latest_version = max([v for v in versions if float(v) >= 500.0], key=float)
         download_url = f"https://jp.download.nvidia.com/Windows/{latest_version}/{latest_version}-desktop-win10-win11-64bit-international-dch-whql.exe"
 
-        # 抜け漏れ防止：ファイルが存在しない、または中身が空なら強制書き込み
+        # 物理的な書き込み判定：
+        # 1. ファイルが存在しない
+        # 2. ファイルサイズが0（空）
+        # 3. ファイルの中に最新バージョンが書かれていない
         should_write = True
         if os.path.exists(history_file) and os.path.getsize(history_file) > 0:
             with open(history_file, "r", encoding="utf-8") as f:
-                content = f.read()
-                if latest_version in content:
+                if latest_version in f.read():
                     should_write = False
 
         if should_write:
-            # "w"モードで確実に最新の状態を書き込む
+            # 確実に新規作成/上書きするために "w" モードを使用
             with open(history_file, "w", encoding="utf-8") as f:
                 f.write(f"{latest_version}: {download_url}\n")
-            print(f"DONE: Written {latest_version}")
+            print(f"SUCCESS: {latest_version} written to file.")
             send_discord_notification(webhook_url, latest_version, download_url)
         else:
-            print(f"SKIP: {latest_version} already exists")
+            print(f"SKIP: {latest_version} is already recorded.")
 
     except Exception as e:
-        print(f"ERROR: {e}")
+        print(f"CRITICAL ERROR: {e}")
 
 if __name__ == "__main__":
     update_driver_history()

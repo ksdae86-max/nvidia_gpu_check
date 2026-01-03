@@ -5,13 +5,22 @@ def send_discord_notification(webhook_url, version, url):
     if not webhook_url: return
     payload = {
         "username": "NVIDIA Driver Bot",
-        "embeds": [{"title": "💎 最新ドライバを検知！", "description": f"バージョン: **{version}**\n[ダウンロード]({url})", "color": 5025616}]
+        "embeds": [{
+            "title": "💎 最新ドライバを検知！",
+            "description": f"バージョン: **{version}**\n[直リンク]({url})",
+            "color": 5025616
+        }]
     }
-    requests.post(webhook_url, json=payload, timeout=10)
+    try:
+        res = requests.post(webhook_url, json=payload, timeout=10)
+        print(f"Discord Notification Sent: {res.status_code}")
+    except Exception as e:
+        print(f"Notification Error: {e}")
 
 def check_url_exists(url):
     try:
-        res = requests.head(url, timeout=3, headers={"User-Agent": "Mozilla/5.0"})
+        # タイムアウトを少し伸ばして安定性を確保
+        res = requests.head(url, timeout=5, headers={"User-Agent": "Mozilla/5.0"})
         return res.status_code == 200
     except:
         return False
@@ -20,50 +29,50 @@ def update_driver_history():
     history_file = "driver_history.txt"
     webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
     
-    # 現在の記録を読み取る（スキャンの開始地点を決めるため）
-    current_version = 591.59
+    # デフォルトの開始地点
+    current_version = 0.0
     if os.path.exists(history_file) and os.path.getsize(history_file) > 0:
         with open(history_file, "r") as f:
             try:
-                current_version = float(f.read().split(":")[0])
+                # 591.59: https://... の形式から数字だけ抽出
+                line = f.readline()
+                current_version = float(line.split(":")[0])
             except:
-                pass
+                current_version = 0.0
 
-    # 現在のメジャーバージョン（591など）の前後をスキャン
-    # 例：591.59なら、592.10 から 591.00 まで下向きに探す
-    base_major = int(current_version)
+    print(f"Checking for updates. Current recorded version: {current_version}")
+
     found_version = None
     found_url = None
 
-    print(f"Scanning for updates starting from {base_major + 1}...")
-
-    # メジャーバージョンを+1まで許容してスキャン
-    for major in [base_major + 1, base_major]:
+    # 現在のバージョンから +2 メジャーバージョン先までスキャン（例: 591 -> 593）
+    start_major = int(current_version) + 2 if current_version > 0 else 593
+    
+    # 巨大なループになるのを防ぎつつ、効率的にスキャン
+    for major in range(start_major, int(current_version) - 1, -1):
+        # メジャーバージョンが変わる時は、.99から探し始める
         for minor in range(99, -1, -1):
             v = f"{major}.{minor:02d}"
+            
+            # すでに持っているバージョン以下ならスキャン終了
+            if float(v) <= current_version:
+                break
+                
             test_url = f"https://jp.download.nvidia.com/Windows/{v}/{v}-desktop-win10-win11-64bit-international-dch-whql.exe"
             
-            # 既に知っているバージョンより下は探さない
-            if float(v) <= current_version and major == base_major:
-                # 既知の最新版（591.59）が見つかったら終了
-                found_version = f"{current_version:.2f}"
-                found_url = f"https://jp.download.nvidia.com/Windows/{found_version}/{found_version}-desktop-win10-win11-64bit-international-dch-whql.exe"
-                break
-
             if check_url_exists(test_url):
                 found_version = v
                 found_url = test_url
                 break
         if found_version: break
 
-    # ファイル更新と通知
-    if found_version and (float(found_version) > current_version):
+    if found_version and float(found_version) > current_version:
         with open(history_file, "w", encoding="utf-8") as f:
             f.write(f"{found_version}: {found_url}\n")
-        print(f"NEW DRIVER FOUND: {found_version}")
+        print(f"NEW DRIVER: {found_version}")
         send_discord_notification(webhook_url, found_version, found_url)
     else:
-        print(f"No new driver. Current: {current_version}")
+        print(f"No new driver found higher than {current_version}")
 
 if __name__ == "__main__":
     update_driver_history()

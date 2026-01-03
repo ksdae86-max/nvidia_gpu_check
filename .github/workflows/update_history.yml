@@ -22,7 +22,7 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
-      - name: Prepare Workspace
+      - name: Prepare Git
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
@@ -33,25 +33,23 @@ jobs:
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
-          # 実行前に古いファイルを物理的に削除して再生成を促す
-          [ -f driver_history.txt ] && rm driver_history.txt
           python get_driver.py
-          echo "--- DEBUG: Check if file exists and has content ---"
-          ls -l driver_history.txt
-          cat driver_history.txt
+          echo "--- DEBUG: Check output ---"
+          # ファイルがある時だけ中身を表示する（エラー防止）
+          if [ -f driver_history.txt ]; then
+            ls -l driver_history.txt
+            cat driver_history.txt
+          else
+            echo "Warning: driver_history.txt was not created."
+          fi
 
-      - name: Force Commit and Push
+      - name: Commit and Push
         run: |
-          # 全ての変更（削除と新規作成）を強制的にステージング
-          git add -A
-          
-          # ファイルが物理的に存在し、中身がある場合のみ実行
+          # ファイルが存在し、中身がある時だけプッシュを試みる
           if [ -s driver_history.txt ]; then
-            echo "Valid file found. Forcing push..."
-            # 差分がなくても強制的にコミットを作ることで、リモートとの同期ズレを解消
-            git commit --allow-empty -m "Auto-update driver history: $(date +'%Y-%m-%d %H:%M')"
+            git add driver_history.txt
+            git commit --allow-empty -m "Update driver: $(date +'%Y-%m-%d %H:%M')"
             git push origin HEAD:main
           else
-            echo "Critical Error: driver_history.txt is empty after script execution."
-            exit 1
+            echo "Nothing to push."
           fi

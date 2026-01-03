@@ -11,36 +11,27 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10' # ブラウザ操作には安定版を指定
-
+          python-version: '3.x'
       - name: Install dependencies
-        run: |
-          pip install requests playwright
-          playwright install chromium --with-deps
-
+        run: pip install requests
       - name: Prepare Git
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git pull origin main
-
       - name: Run update script
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
           python get_driver.py
-          if [ -s driver_history.txt ]; then
-            cat driver_history.txt
-          fi
-
+          cat driver_history.txt
       - name: Commit and Push
         run: |
           if [ -s driver_history.txt ]; then
             git add driver_history.txt
-            git commit --allow-empty -m "Auto-update via Browser: $(date +'%Y-%m-%d %H:%M')"
+            git commit --allow-empty -m "Direct detection update: $(date +'%Y-%m-%d %H:%M')"
             git push origin HEAD:main
           fi

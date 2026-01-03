@@ -29,7 +29,9 @@ def send_discord_notification(webhook_url, version, url):
         print(f"Failed to send Discord notification: {e}")
 
 def update_driver_history():
-    api_url = "https://www.nvidia.com/Download/processFind.aspx?psid=127&pfid=956&osid=135&lid=1&whql=1&isDCH=1&dtcid=1"
+    # ターゲット: RTX 40シリーズ(汎用), Win11, Game Ready(whql=1), DCH
+    # pfid=933 に広げることで、4060単体指定(956)より新しいデータが降りてきやすくなります
+    api_url = "https://www.nvidia.com/Download/processFind.aspx?psid=127&pfid=933&osid=135&lid=1&whql=1&isDCH=1"
     history_file = "driver_history.txt"
     webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
     
@@ -44,14 +46,21 @@ def update_driver_history():
     }
 
     try:
-        print("Connecting to NVIDIA Release API...")
+        print("Connecting to NVIDIA Release API (Focusing on Latest Game Ready)...")
         response = session.get(api_url, headers=headers, timeout=(10, 30))
         content = response.text
         
-        # バージョン抽出
-        match = re.search(r'(\d{3}\.\d{2})', content)
-        if not match: return
-        latest_version = match.group(1)
+        # 見つかったすべてのバージョン（XXX.XX）を抽出
+        versions = re.findall(r'(\d{3}\.\d{2})', content)
+        
+        if not versions:
+            print(f"DEBUG: Content Snippet: {content[:500]}")
+            raise ValueError("Driver version pattern not found.")
+
+        # 見つかった中で最も大きい数字を「最新のGame Ready」として採用
+        latest_version = max(versions, key=float)
+        
+        print(f"Latest Game Ready Version Found: {latest_version}")
 
         download_url = f"https://us.download.nvidia.com/Windows/{latest_version}/{latest_version}-desktop-win10-win11-64bit-international-dch-whql.exe"
 

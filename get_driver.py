@@ -50,17 +50,25 @@ def update_driver_history():
         response = session.get(api_url, headers=headers, timeout=(10, 30))
         content = response.text
         
-        # 見つかったすべてのバージョン（XXX.XX）を抽出
-        versions = re.findall(r'(\d{3}\.\d{2})', content)
-        
-        if not versions:
+       # すべてのバージョン（XXX.XX）を抽出
+        all_versions = re.findall(r'(\d{3}\.\d{2})', content)
+
+        if not all_versions:
             print(f"DEBUG: Content Snippet: {content[:500]}")
             raise ValueError("Driver version pattern not found.")
 
-        # 見つかった中で最も大きい数字を「最新のGame Ready」として採用
-        latest_version = max(versions, key=float)
-        
-        print(f"Latest Game Ready Version Found: {latest_version}")
+        # --- 修正ポイント：500番台以上の現行ドライバのみにフィルタリング ---
+        # 400番台（472.12など）を完全に無視します
+        modern_versions = [v for v in all_versions if float(v) >= 500.0]
+
+        if not modern_versions:
+            # もし500番台が見つからない場合は、仕方なく全体から最大値を取る（保険）
+            latest_version = max(all_versions, key=float)
+        else:
+            # 500番台の中で最大のものを採用
+            latest_version = max(modern_versions, key=float)
+
+        print(f"Latest Modern Game Ready Version Found: {latest_version}")
 
         download_url = f"https://us.download.nvidia.com/Windows/{latest_version}/{latest_version}-desktop-win10-win11-64bit-international-dch-whql.exe"
 

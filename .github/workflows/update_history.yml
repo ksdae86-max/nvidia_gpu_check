@@ -32,18 +32,18 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           
-          # 1. 念のため最新のmainブランチに合わせる
+          # 最新のmainブランチを確実に追跡する
           git fetch origin main
           git checkout main
           
-          # 2. Pythonが更新したファイルをステージング
+          # driver_history.txt をステージング
           git add driver_history.txt
           
-          # 3. 差分がある時だけコミットして「確実に」mainへPush
+          # 差分がある場合のみコミットしてPush
           if ! git diff --cached --exit-code; then
             echo "Changes detected. Pushing to main branch..."
             git commit -m "Update driver history: $(date +'%Y-%m-%d %H:%M')"
-            # ここが重要：HEAD（今いる場所）を origin の main へ送る
+            # HEADをoriginのmainに強制的に押し込む
             git push origin HEAD:main
           else
             echo "No changes detected in driver_history.txt."

@@ -36,4 +36,14 @@ jobs:
           git pull origin main --rebase
           
           # 2. Pythonが更新したファイルをステージング
-          # ※ここでは touch し
+          # ※ここでは touch しない（Pythonが作った中身を確実に拾うため）
+          git add driver_history.txt
+          
+          # 3. 差分があるかチェックしてPush
+          if ! git diff --cached --exit-code; then
+            echo "New version detected. Committing changes..."
+            git commit -m "Update driver history: $(date +'%Y-%m-%d %H:%M')"
+            git push origin main
+          else
+            echo "No new version found in driver_history.txt. Skipping push."
+          fi

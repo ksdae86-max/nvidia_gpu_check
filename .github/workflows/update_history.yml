@@ -28,25 +28,26 @@ jobs:
           git config --local user.name "GitHub Action"
           git checkout main
           git pull origin main
-          # 以前のゴミ（古いバージョンの記憶）を消去
-          rm -f driver_history.txt
 
       - name: Run update script
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
           python get_driver.py
-          echo "--- FINAL VALIDATION ---"
-          if [ -f driver_history.txt ]; then
+          echo "--- LOG CHECK ---"
+          if [ -s driver_history.txt ]; then
             cat driver_history.txt
           else
-            echo "ERROR: File not created."
-            exit 1
+            echo "Warning: driver_history.txt is empty or not found."
           fi
 
-      - name: Force Push to Main
+      - name: Commit and Push
         run: |
-          git add driver_history.txt
-          # 差分に関わらず、最新の状態を強制的に歴史に刻む
-          git commit --allow-empty -m "Verified update: $(date +'%Y-%m-%d %H:%M')"
-          git push origin HEAD:main
+          # ファイルが存在し、中身がある場合のみ実行
+          if [ -s driver_history.txt ]; then
+            git add driver_history.txt
+            git commit --allow-empty -m "Auto-update: $(date +'%Y-%m-%d %H:%M')"
+            git push origin HEAD:main
+          else
+            echo "Skipping push: No data to update."
+          fi

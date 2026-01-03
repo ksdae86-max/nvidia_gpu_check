@@ -8,11 +8,11 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # リポジトリへの書き込み権限を明示的に許可
+      contents: write # リポジトリへの書き込み権限
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # 全履歴を取得してPush時のエラーを防ぐ
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -22,32 +22,30 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
-      - name: Run update script
-        env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: python get_driver.py
-
-      - name: Commit and Push changes
+      - name: Prepare Branch
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          
-          # 1. 確実に最新の main ブランチを取得して切り替える
+          # 先に最新のmainブランチに切り替える
           git fetch origin main
           git checkout main
-          
-          # 2. Python が生成したファイルを強制的に認識させる
-          git add -f driver_history.txt
-          
-          # 3. 差分をチェックしてコミット
+
+      - name: Run update script
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          python get_driver.py
+          echo "--- Current File Content ---"
+          cat driver_history.txt || echo "File is empty"
+
+      - name: Commit and Push changes
+        run: |
+          git add driver_history.txt
+          # 差分がある時だけコミットしてPush
           if ! git diff --cached --exit-code; then
-            echo "Changes detected. Committing..."
+            echo "Changes detected. Pushing to main..."
             git commit -m "Update driver history: $(date +'%Y-%m-%d %H:%M')"
-            # 4. 確実にリモートの main へ上書きプッシュ
-            git push origin HEAD:main
+            git push origin main
           else
-            echo "No changes found. Making sure the file is tracked."
-            # 念のため、空の場合でも追跡を開始させる（初回用）
-            git commit --allow-empty -m "Trigger update"
-            git push origin HEAD:main
+            echo "No changes detected. Skipping push."
           fi

@@ -70,11 +70,27 @@ def update_driver_history():
 
         print(f"Latest Modern Game Ready Version Found: {latest_version}")
 
-        download_url = f"https://us.download.nvidia.com/Windows/{latest_version}/{latest_version}-desktop-win10-win11-64bit-international-dch-whql.exe"
+        # --- ここから書き換え ---
+        # 1. 日本(JP)サーバーを優先し、2. 米国(US)サーバーを予備とする
+        domains = ["jp.download.nvidia.com", "us.download.nvidia.com"]
+        file_name = f"{latest_version}-desktop-win10-win11-64bit-international-dch-whql.exe"
+        
+        download_url = None
+        for domain in domains:
+            test_url = f"https://{domain}/Windows/{latest_version}/{file_name}"
+            print(f"Checking URL on {domain}: {test_url}")
+            try:
+                check_res = session.head(test_url, headers=headers, allow_redirects=True, timeout=10)
+                if check_res.status_code == 200:
+                    download_url = test_url
+                    print(f"VALID: Match Found on {domain}!")
+                    break
+            except Exception as e:
+                print(f"Server {domain} check failed: {e}")
 
-        # URL生存確認
-        print(f"Checking URL: {download_url}")
-        check_res = session.head(download_url, headers=headers, allow_redirects=True, timeout=10)
+        if not download_url:
+            print(f"Link is 404 on all servers. Waiting for NVIDIA to upload the file...")
+            return # 関数を抜ける（保存・通知処理をスキップ）
         
         if check_res.status_code == 200:
             # 履歴チェック

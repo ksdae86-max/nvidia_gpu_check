@@ -1,18 +1,18 @@
 name: Update NVIDIA Driver History
 on:
   schedule:
-    - cron: '0 0 * * *' # 毎日日本時間の午前9時頃
+    - cron: '0 0 * * *' # 毎日日本時間の午前9時頃実行
   workflow_dispatch: # 手動実行ボタン
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # 書き込み権限を明示的に許可
+      contents: write # 確実にリポジトリに書き込むために必須
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # 全履歴を取得してPush時のエラーを防ぐ
+          fetch-depth: 0 # 履歴をすべて取得（Pushエラー防止）
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -32,18 +32,16 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           
-          # 1. 念のため最新状態をPull（コンフリクト防止）
-          git pull origin main --rebase
-          
-          # 2. ファイルをステージング
+          # 1. driver_history.txt をステージング
           git add driver_history.txt
           
-          # 3. 差分がある時だけコミットしてプッシュ
+          # 2. 変更がある場合のみ実行
           if ! git diff --cached --exit-code; then
+            echo "Changes detected. Pushing to repository..."
             git commit -m "Update driver history: $(date +'%Y-%m-%d %H:%M')"
-            # 明示的に main ブランチへプッシュ
+            # コンフリクト防止のため Pull してから Push
+            git pull origin main --rebase
             git push origin main
-            echo "Changes pushed successfully!"
           else
-            echo "No changes detected. Skipping push."
+            echo "No changes in driver_history.txt. Nothing to push."
           fi

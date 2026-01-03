@@ -5,14 +5,13 @@ def send_discord_notification(webhook_url, version, url):
     if not webhook_url: return
     payload = {
         "username": "NVIDIA Driver Bot",
-        "embeds": [{"title": "💎 最新ドライバを直撃検知！", "description": f"バージョン: **{version}**\n[直リンク]({url})", "color": 5025616}]
+        "embeds": [{"title": "💎 最新ドライバを検知！", "description": f"バージョン: **{version}**\n[ダウンロード]({url})", "color": 5025616}]
     }
     requests.post(webhook_url, json=payload, timeout=10)
 
 def check_url_exists(url):
     try:
-        # HEADリクエストでファイルの存在だけを高速確認
-        res = requests.head(url, timeout=5, headers={"User-Agent": "Mozilla/5.0"})
+        res = requests.head(url, timeout=3, headers={"User-Agent": "Mozilla/5.0"})
         return res.status_code == 200
     except:
         return False
@@ -21,40 +20,50 @@ def update_driver_history():
     history_file = "driver_history.txt"
     webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
     
-    # 591.xx を中心に、周辺の数字を総当たりで確認
-    # バージョンが上がった時にも対応できるよう、現在の最新付近をスキャン
-    base_major = 591
-    start_minor = 70  # 現在の591.59より上からスタート
-    end_minor = 50    # 下に向かってスキャン
-    
-    print(f"Scanning for live download links...")
-    
+    # 現在の記録を読み取る（スキャンの開始地点を決めるため）
+    current_version = 591.59
+    if os.path.exists(history_file) and os.path.getsize(history_file) > 0:
+        with open(history_file, "r") as f:
+            try:
+                current_version = float(f.read().split(":")[0])
+            except:
+                pass
+
+    # 現在のメジャーバージョン（591など）の前後をスキャン
+    # 例：591.59なら、592.10 から 591.00 まで下向きに探す
+    base_major = int(current_version)
     found_version = None
     found_url = None
 
-    # 最新から順に下に向かって、URLが実在するかチェック
-    # (例: 591.65, 591.64, ... 591.59)
-    for minor in range(start_minor, end_minor - 1, -1):
-        v = f"{base_major}.{minor:02d}"
-        test_url = f"https://jp.download.nvidia.com/Windows/{v}/{v}-desktop-win10-win11-64bit-international-dch-whql.exe"
-        
-        print(f"Checking {v}...", end="\r")
-        if check_url_exists(test_url):
-            found_version = v
-            found_url = test_url
-            break
+    print(f"Scanning for updates starting from {base_major + 1}...")
 
-    if not found_version:
-        # 万が一見つからない場合は、今の確定版 591.59 をセット
-        found_version = "591.59"
-        found_url = f"https://jp.download.nvidia.com/Windows/591.59/591.59-desktop-win10-win11-64bit-international-dch-whql.exe"
+    # メジャーバージョンを+1まで許容してスキャン
+    for major in [base_major + 1, base_major]:
+        for minor in range(99, -1, -1):
+            v = f"{major}.{minor:02d}"
+            test_url = f"https://jp.download.nvidia.com/Windows/{v}/{v}-desktop-win10-win11-64bit-international-dch-whql.exe"
+            
+            # 既に知っているバージョンより下は探さない
+            if float(v) <= current_version and major == base_major:
+                # 既知の最新版（591.59）が見つかったら終了
+                found_version = f"{current_version:.2f}"
+                found_url = f"https://jp.download.nvidia.com/Windows/{found_version}/{found_version}-desktop-win10-win11-64bit-international-dch-whql.exe"
+                break
 
-    print(f"\nTarget found: {found_version}")
+            if check_url_exists(test_url):
+                found_version = v
+                found_url = test_url
+                break
+        if found_version: break
 
-    with open(history_file, "w", encoding="utf-8") as f:
-        f.write(f"{found_version}: {found_url}\n")
-    
-    send_discord_notification(webhook_url, found_version, found_url)
+    # ファイル更新と通知
+    if found_version and (float(found_version) > current_version):
+        with open(history_file, "w", encoding="utf-8") as f:
+            f.write(f"{found_version}: {found_url}\n")
+        print(f"NEW DRIVER FOUND: {found_version}")
+        send_discord_notification(webhook_url, found_version, found_url)
+    else:
+        print(f"No new driver. Current: {current_version}")
 
 if __name__ == "__main__":
     update_driver_history()

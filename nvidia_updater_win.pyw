@@ -8,18 +8,32 @@ import ctypes
 import sys
 from windows_toasts import WindowsToaster, ToastText1, ToastActivatedEventArgs
 
-# --- 設定 ---
+# ==========================================
+# 1. 実行環境の強制固定（タスクスケジューラ対策）
+# ==========================================
+# 実行ファイル（.py または .pyw）のあるディレクトリを絶対パスで取得
+if getattr(sys, 'frozen', False):
+    BASE_DIR = os.path.dirname(os.path.abspath(sys.executable))
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# 作業ディレクトリをスクリプトの場所に移動
+os.chdir(BASE_DIR)
+
+# --- パス設定（すべて絶対パス） ---
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/ksdae86-max/nvidia_gpu_check/main/driver_history.txt"
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE = os.path.join(BASE_DIR, "updater.log")
 VERSION_LOG = os.path.join(BASE_DIR, "installed_version.txt")
 TEMP_EXE = os.path.join(os.environ["TEMP"], "nvidia_update_temp.exe")
 
-# 1. ログの堅牢化：エンコーディングをutf-8に固定し、Windows特有の文字化けを防止
+# --- ログ設定（utf-8で文字化け防止） ---
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
-    handlers=[logging.FileHandler(LOG_FILE, encoding='utf-8'), logging.StreamHandler()]
+    handlers=[
+        logging.FileHandler(LOG_FILE, encoding='utf-8'),
+        logging.StreamHandler()
+    ]
 )
 
 class NVIDIAUpdater:
@@ -36,7 +50,7 @@ class NVIDIAUpdater:
             return False
 
     def get_actual_installed_version(self):
-        # 2. レジストリ取得のフォールバック強化
+        """レジストリから現在インストール済みのドライババージョンを取得"""
         paths = [
             (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{B2FE1952-0186-46C3-BAEC-A80AA35AC5B8}_Display.Driver"),
             (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\NVIDIA Corporation\Global\NVTweak"),
@@ -50,102 +64,100 @@ class NVIDIAUpdater:
                 continue
         
         if os.path.exists(VERSION_LOG):
-            with open(VERSION_LOG, "r", encoding='utf-8') as f: return f.read().strip()
+            try:
+                with open(VERSION_LOG, "r", encoding='utf-8') as f: return f.read().strip()
+            except: pass
         return "0.0"
 
     def on_toast_activated(self, args: ToastActivatedEventArgs):
-        """通知ボタンが押された時のコールバック"""
+        """通知ボタンが押された時の処理"""
         if args.arguments == "install":
             self.is_installing = True
             if not self.is_admin():
-                logging.error("管理者権限が必要です。タスクスケジューラの『最上位の特権』を確認してください。")
+                logging.error("権限不足：管理者として実行されていません。")
                 return
 
-            logging.info(f"承認：インストールを開始します ({self.target_version})")
+            logging.info(f"インストール承認：Version {self.target_version}")
             try:
-                # 3. サイレントフラグの最適化
+                # サイレントインストール実行
                 # -s: Silent, -n: No Reboot, -f: Force
                 process = subprocess.Popen([TEMP_EXE, "-s", "-n", "-f"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 process.wait()
 
-                # 4. インストール後の検証（15秒待機してレジストリ反映を確認）
-                time.sleep(15)
-                if self.get_actual_installed_version() == self.target_version:
-                    logging.info("インストール成功を確認しました。")
+                # 反映待ち
+                time.sleep(20)
+                actual = self.get_actual_installed_version()
+                if actual == self.target_version:
+                    logging.info(f"インストール成功完了：{actual}")
                     with open(VERSION_LOG, "w", encoding='utf-8') as f: f.write(self.target_version)
                     if os.path.exists(TEMP_EXE): os.remove(TEMP_EXE)
                 else:
-                    logging.warning("インストール完了後にバージョンが一致しませんでした。")
+                    logging.warning(f"インストール後のバージョン不一致（現在: {actual}）")
             except Exception as e:
-                logging.error(f"インストールエラー: {e}")
+                logging.error(f"インストールプロセスエラー: {e}")
             finally:
                 self.is_installing = False
 
     def check(self):
-        # 5. 前回の残骸を確実にクリーニング
+        """GitHubと現行バージョンを比較"""
+        # 古いゴミがあれば削除
         if os.path.exists(TEMP_EXE):
             try: os.remove(TEMP_EXE)
-            except PermissionError:
-                logging.error("前回のインストーラーがまだ実行中かロックされています。")
-                return
+            except: pass
 
         actual_ver = self.get_actual_installed_version()
-        logging.info(f"起動：現在のシステムバージョン {actual_ver}")
+        logging.info(f"チェック開始（現バージョン: {actual_ver}）")
 
-        # 6. 通信リトライ（最大3回）
-        for attempt in range(3):
-            try:
-                res = requests.get(GITHUB_RAW_URL, timeout=10)
-                res.raise_for_status()
-                self.target_version, self.download_url = res.text.strip().split(": ")
-                break
-            except Exception as e:
-                if attempt == 2: raise
-                time.sleep(5)
+        # GitHubから最新情報の取得
+        try:
+            res = requests.get(GITHUB_RAW_URL, timeout=15)
+            res.raise_for_status()
+            self.target_version, self.download_url = res.text.strip().split(": ")
+        except Exception as e:
+            logging.error(f"GitHub取得失敗: {e}")
+            return
 
-        # 7. バージョン比較の精度向上
-        if float(self.target_version) > float(actual_ver):
-            logging.info(f"新バージョン検知: {self.target_version}")
-            
-            # 8. ストリーミングダウンロードで巨大ファイルに対応
-            print(f"[*] ドライバをダウンロード中...")
-            with requests.get(self.download_url, stream=True) as r:
-                r.raise_for_status()
-                total = int(r.headers.get('content-length', 0))
-                done = 0
-                with open(TEMP_EXE, "wb") as f:
-                    for chunk in r.iter_content(chunk_size=1024*1024):
-                        f.write(chunk)
-                        done += len(chunk)
-                        if total > 0:
-                            print(f"\rProgress: {done/total:.1%}", end="")
-            print("\n[*] ダウンロード完了。")
-            self.show_notification()
-        else:
-            logging.info("システムは最新です。")
+        # バージョン比較
+        try:
+            if float(self.target_version) > float(actual_ver):
+                logging.info(f"新バージョン検知: {self.target_version}")
+                
+                # ダウンロード
+                logging.info(f"ダウンロード開始: {self.download_url}")
+                with requests.get(self.download_url, stream=True) as r:
+                    r.raise_for_status()
+                    with open(TEMP_EXE, "wb") as f:
+                        for chunk in r.iter_content(chunk_size=1024*1024):
+                            f.write(chunk)
+                
+                logging.info("ダウンロード完了。通知を送信します。")
+                self.show_notification()
+            else:
+                logging.info("アップデートの必要はありません。")
+        except Exception as e:
+            logging.error(f"バージョン比較エラー: {e}")
 
     def show_notification(self):
-        # 9. トースト通知の視認性向上
+        """Windowsトースト通知を送信"""
         toaster = WindowsToaster('NVIDIA Driver Manager')
         toast = ToastText1()
-        toast.body = f"🚀 最新ドライバ {self.target_version} の準備完了。\n今すぐインストールしますか？（画面が暗転します）"
+        toast.body = f"🚀 NVIDIA ドライバ {self.target_version} の準備完了。\n今すぐインストールしますか？（画面暗転注意）"
         toast.add_action('今すぐインストール', 'install')
         toast.add_action('あとで', 'later')
         toast.on_activated = self.on_toast_activated
         toaster.show_toast(toast)
 
-        # 10. 通知の応答待機ループ（ボタンが押されるまで死なない）
-        logging.info("ユーザーの応答を待機中...")
-        wait_seconds = 120 # 最大120秒待機
-        for _ in range(wait_seconds):
+        # 通知応答待機（ボタン入力を受け付けるため一定時間生存する）
+        logging.info("通知応答待機中（120秒）...")
+        for _ in range(120):
             if self.is_installing:
-                while self.is_installing: time.sleep(1) # インストール中は待機継続
+                while self.is_installing: time.sleep(1)
                 break
             time.sleep(1)
 
 if __name__ == "__main__":
-    # 多重起動防止（1時間以内の二重起動をブロック）
-    lock_path = os.path.join(os.environ["TEMP"], "nv_updater_smart.lock")
+    # 多重起動防止
+    lock_path = os.path.join(os.environ["TEMP"], "nv_updater_smart_final.lock")
     if os.path.exists(lock_path):
         if time.time() - os.path.getmtime(lock_path) < 3600:
             sys.exit()

@@ -24,7 +24,8 @@ else:
 
 os.chdir(BASE_DIR)
 
-# --- 設定（定数をここに集約） ---
+# --- 設定（パブリックリポジトリのRaw URL） ---
+# トークン（?token=...）を除去した、純粋なRaw URLにしてください
 GITHUB_URL = "https://raw.githubusercontent.com/ksdae86-max/nvidia_gpu_check/main/driver_history.txt"
 LOG_FILE = os.path.join(BASE_DIR, "updater.log")
 VERSION_LOG = os.path.join(BASE_DIR, "installed_version.txt")
@@ -81,7 +82,7 @@ class NVIDIAUpdater:
 
             logging.info(f"インストール開始承認：Version {self.target_version}")
             try:
-                # -s (Silent), -n (No Reboot), -f (Force)
+                # インストーラー実行 (-s: Silent, -n: No Reboot, -f: Force)
                 process = subprocess.Popen([TEMP_EXE, "-s", "-n", "-f"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 process.wait()
 
@@ -107,24 +108,25 @@ class NVIDIAUpdater:
         logging.info(f"チェック開始（現バージョン: {actual_ver}）")
 
         try:
-            # クラス外で定義した GITHUB_URL を使用
             res = requests.get(GITHUB_URL, timeout=15)
             res.raise_for_status()
-            # パース処理
+            
+            # 解析: 「バージョン: URL」の形式を想定
             content = res.text.strip().split(": ")
             if len(content) < 2:
-                logging.error("GitHubのファイル形式が不正です。")
+                logging.error(f"解析失敗。ファイル内容を確認してください。")
                 return
             self.target_version = content[0]
             self.download_url = content[1]
         except Exception as e:
-            logging.error(f"GitHub取得失敗: {e}")
+            logging.error(f"GitHub取得失敗 (URLを確認): {e}")
             return
 
         try:
+            # 数値比較
             if float(self.target_version) > float(actual_ver):
                 logging.info(f"新バージョン検知: {self.target_version}")
-                logging.info(f"ダウンロード中: {self.download_url}")
+                logging.info(f"ダウンロード開始...")
                 
                 with requests.get(self.download_url, stream=True) as r:
                     r.raise_for_status()
@@ -132,12 +134,12 @@ class NVIDIAUpdater:
                         for chunk in r.iter_content(chunk_size=1024*1024):
                             f.write(chunk)
                 
-                logging.info("完了。通知を送信します。")
+                logging.info("ダウンロード完了。通知を送信します。")
                 self.show_notification()
             else:
                 logging.info("ドライバは最新です。")
         except Exception as e:
-            logging.error(f"比較・ダウンロード工程でエラー: {e}")
+            logging.error(f"処理エラー: {e}")
 
     def show_notification(self):
         toaster = WindowsToaster('NVIDIA Driver Manager')
@@ -152,7 +154,7 @@ class NVIDIAUpdater:
         
         toaster.show_toast(new_toast)
 
-        logging.info("応答待機中...")
+        logging.info("応答待機中（120秒）...")
         for _ in range(120):
             if self.is_installing:
                 while self.is_installing: time.sleep(1)
@@ -160,7 +162,8 @@ class NVIDIAUpdater:
             time.sleep(1)
 
 if __name__ == "__main__":
-    lock_path = os.path.join(os.environ["TEMP"], "nv_updater_smart_v3.lock")
+    # 多重起動防止
+    lock_path = os.path.join(os.environ["TEMP"], "nv_updater_final.lock")
     if os.path.exists(lock_path):
         if time.time() - os.path.getmtime(lock_path) < 3600:
             sys.exit()

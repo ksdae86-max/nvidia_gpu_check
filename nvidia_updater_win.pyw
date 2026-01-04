@@ -6,27 +6,29 @@ import winreg
 import logging
 import ctypes
 import sys
-from windows_toasts import WindowsToaster, ToastText1, ToastActivatedEventArgs
+
+# ライブラリの読み込み
+try:
+    from windows_toasts import WindowsToaster, Toast, ToastActivatedEventArgs
+except ImportError as e:
+    # ライブラリがない場合、ログに書き残す
+    print(f"Required library missing: {e}")
+    sys.exit(1)
 
 # ==========================================
 # 1. 実行環境の強制固定（タスクスケジューラ対策）
 # ==========================================
-# 実行ファイル（.py または .pyw）のあるディレクトリを絶対パスで取得
 if getattr(sys, 'frozen', False):
     BASE_DIR = os.path.dirname(os.path.abspath(sys.executable))
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# 作業ディレクトリをスクリプトの場所に移動
 os.chdir(BASE_DIR)
 
-# --- パス設定（すべて絶対パス） ---
-GITHUB_RAW_URL = "https://raw.githubusercontent.com/ksdae86-max/nvidia_gpu_check/main/driver_history.txt"
 LOG_FILE = os.path.join(BASE_DIR, "updater.log")
 VERSION_LOG = os.path.join(BASE_DIR, "installed_version.txt")
 TEMP_EXE = os.path.join(os.environ["TEMP"], "nvidia_update_temp.exe")
 
-# --- ログ設定（utf-8で文字化け防止） ---
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
@@ -50,7 +52,6 @@ class NVIDIAUpdater:
             return False
 
     def get_actual_installed_version(self):
-        """レジストリから現在インストール済みのドライババージョンを取得"""
         paths = [
             (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{B2FE1952-0186-46C3-BAEC-A80AA35AC5B8}_Display.Driver"),
             (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\NVIDIA Corporation\Global\NVTweak"),
@@ -70,7 +71,7 @@ class NVIDIAUpdater:
         return "0.0"
 
     def on_toast_activated(self, args: ToastActivatedEventArgs):
-        """通知ボタンが押された時の処理"""
+        # ボタンのID（arguments）で判定
         if args.arguments == "install":
             self.is_installing = True
             if not self.is_admin():
@@ -79,12 +80,9 @@ class NVIDIAUpdater:
 
             logging.info(f"インストール承認：Version {self.target_version}")
             try:
-                # サイレントインストール実行
-                # -s: Silent, -n: No Reboot, -f: Force
                 process = subprocess.Popen([TEMP_EXE, "-s", "-n", "-f"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 process.wait()
 
-                # 反映待ち
                 time.sleep(20)
                 actual = self.get_actual_installed_version()
                 if actual == self.target_version:
@@ -99,8 +97,6 @@ class NVIDIAUpdater:
                 self.is_installing = False
 
     def check(self):
-        """GitHubと現行バージョンを比較"""
-        # 古いゴミがあれば削除
         if os.path.exists(TEMP_EXE):
             try: os.remove(TEMP_EXE)
             except: pass
@@ -108,7 +104,6 @@ class NVIDIAUpdater:
         actual_ver = self.get_actual_installed_version()
         logging.info(f"チェック開始（現バージョン: {actual_ver}）")
 
-        # GitHubから最新情報の取得
         try:
             res = requests.get(GITHUB_RAW_URL, timeout=15)
             res.raise_for_status()
@@ -117,12 +112,10 @@ class NVIDIAUpdater:
             logging.error(f"GitHub取得失敗: {e}")
             return
 
-        # バージョン比較
         try:
             if float(self.target_version) > float(actual_ver):
                 logging.info(f"新バージョン検知: {self.target_version}")
                 
-                # ダウンロード
                 logging.info(f"ダウンロード開始: {self.download_url}")
                 with requests.get(self.download_url, stream=True) as r:
                     r.raise_for_status()
@@ -135,19 +128,26 @@ class NVIDIAUpdater:
             else:
                 logging.info("アップデートの必要はありません。")
         except Exception as e:
-            logging.error(f"バージョン比較エラー: {e}")
+            logging.error(f"エラー: {e}")
 
     def show_notification(self):
-        """Windowsトースト通知を送信"""
+        # 最新の windows-toasts (v0.6.0+) に対応した書き方
         toaster = WindowsToaster('NVIDIA Driver Manager')
-        toast = ToastText1()
-        toast.body = f"🚀 NVIDIA ドライバ {self.target_version} の準備完了。\n今すぐインストールしますか？（画面暗転注意）"
-        toast.add_action('今すぐインストール', 'install')
-        toast.add_action('あとで', 'later')
-        toast.on_activated = self.on_toast_activated
-        toaster.show_toast(toast)
+        new_toast = Toast()
+        new_toast.text_fields = [
+            f"🚀 NVIDIA ドライバ {self.target_version} の準備完了。",
+            "今すぐインストールしますか？（画面暗転注意）"
+        ]
+        
+        # ボタンの追加
+        new_toast.add_action('今すぐインストール', 'install')
+        new_toast.add_action('あとで', 'later')
+        
+        # コールバック設定
+        new_toast.on_activated = self.on_toast_activated
+        
+        toaster.show_toast(new_toast)
 
-        # 通知応答待機（ボタン入力を受け付けるため一定時間生存する）
         logging.info("通知応答待機中（120秒）...")
         for _ in range(120):
             if self.is_installing:
@@ -156,7 +156,6 @@ class NVIDIAUpdater:
             time.sleep(1)
 
 if __name__ == "__main__":
-    # 多重起動防止
     lock_path = os.path.join(os.environ["TEMP"], "nv_updater_smart_final.lock")
     if os.path.exists(lock_path):
         if time.time() - os.path.getmtime(lock_path) < 3600:

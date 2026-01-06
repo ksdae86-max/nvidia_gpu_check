@@ -7,7 +7,7 @@ import logging
 import ctypes
 import sys
 
-# ライブラリの読み込み
+# --- ライブラリの読み込み (v1.3.1仕様) ---
 try:
     from windows_toasts import InteractableWindowsToaster, Toast, ToastActivatedEventArgs, ToastButton
 except ImportError:
@@ -22,13 +22,17 @@ if getattr(sys, 'frozen', False):
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# 基準ディレクトリをスクリプトフォルダ(C:\scrypt)に固定
 os.chdir(BASE_DIR)
 
 # 設定
 GITHUB_URL = "https://raw.githubusercontent.com/ksdae86-max/nvidia_gpu_check/main/driver_history.txt"
 LOG_FILE = os.path.join(BASE_DIR, "updater.log")
-VERSION_LOG = os.path.join(BASE_DIR, "installed_version.txt")
+VERSION_LOG = os.path.join(BASE_DIR, "installed_version.txt") # 最後にインストールに成功したVer
+
+# 保存先とバージョン管理用ファイル
 TEMP_EXE = os.path.join(BASE_DIR, "nvidia_update_temp.exe")
+DOWNLOADED_VER_FILE = os.path.join(BASE_DIR, "downloaded_version.txt") # DL済みexeのVer
 
 # ログ設定
 logging.basicConfig(
@@ -51,6 +55,7 @@ class NVIDIAUpdater:
             return False
 
     def get_actual_installed_version(self):
+        """レジストリから現在のドライババージョンを取得"""
         paths = [
             (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{B2FE1952-0186-46C3-BAEC-A80AA35AC5B8}_Display.Driver"),
             (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\NVIDIA Corporation\Global\NVTweak"),
@@ -69,6 +74,7 @@ class NVIDIAUpdater:
         return "0.0"
 
     def on_toast_activated(self, args: ToastActivatedEventArgs):
+        """通知ボタンが押された時の動作"""
         if args.arguments == "install":
             self.is_installing = True
             if not self.is_admin():
@@ -78,11 +84,11 @@ class NVIDIAUpdater:
 
             logging.info(f"承認されました。インストール開始: Ver {self.target_version}")
             try:
-                # 実行ファイルの存在確認
                 if not os.path.exists(TEMP_EXE):
-                    logging.error("インストーラーが見つかりません。再ダウンロードしてください。")
+                    logging.error("実行ファイルが見つかりません。")
                     return
 
+                # サイレントインストール実行
                 process = subprocess.Popen([TEMP_EXE, "-s", "-n", "-f"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 process.wait()
 
@@ -93,22 +99,20 @@ class NVIDIAUpdater:
                 if actual == self.target_version:
                     logging.info(f"成功：バージョン {actual} に更新されました。")
                     with open(VERSION_LOG, "w", encoding='utf-8') as f: f.write(self.target_version)
-                    if os.path.exists(TEMP_EXE): os.remove(TEMP_EXE)
+                    self._cleanup_temp_files()
                 else:
-                    logging.warning(f"更新不一致。手動確認が必要（現在: {actual}）")
+                    logging.warning(f"更新不一致（現在: {actual}）。手動確認してください。")
             except Exception as e:
                 logging.error(f"インストールエラー: {e}")
             finally:
                 self.is_installing = False
 
     def check(self):
-        if os.path.exists(TEMP_EXE):
-            try: os.remove(TEMP_EXE)
-            except: pass
-
+        """メイン処理：整合性チェック機能付き"""
         actual_ver = self.get_actual_installed_version()
         logging.info(f"チェック開始（現在: {actual_ver}）")
 
+        # 1. GitHubから最新情報を取得
         try:
             res = requests.get(GITHUB_URL, timeout=15)
             res.raise_for_status()
@@ -120,52 +124,82 @@ class NVIDIAUpdater:
             logging.error(f"GitHub取得失敗: {e}")
             return
 
-        try:
-            if float(self.target_version) > float(actual_ver):
-                logging.info(f"新バージョン検知: {self.target_version}. ダウンロード開始...")
+        # 2. すでに最新なら掃除して終了
+        if float(self.target_version) <= float(actual_ver):
+            logging.info("すでに最新の状態です。")
+            self._cleanup_temp_files()
+            return
+
+        # 3. 既存ファイルが「今必要なVer」か確認
+        skip_download = False
+        if os.path.exists(TEMP_EXE) and os.path.exists(DOWNLOADED_VER_FILE):
+            with open(DOWNLOADED_VER_FILE, "r") as f:
+                saved_ver = f.read().strip()
+            
+            if saved_ver == self.target_version and os.path.getsize(TEMP_EXE) > 100 * 1024 * 1024:
+                logging.info(f"既存の正当なファイル ({saved_ver}) を発見。DLをスキップします。")
+                skip_download = True
+            else:
+                logging.info("既存ファイルが古い、または不完全です。再取得します。")
+                self._cleanup_temp_files()
+
+        # 4. 必要に応じてダウンロード
+        if not skip_download:
+            try:
+                logging.info(f"新バージョン {self.target_version} をダウンロード中...")
                 with requests.get(self.download_url, stream=True, timeout=30) as r:
                     r.raise_for_status()
                     with open(TEMP_EXE, "wb") as f:
                         for chunk in r.iter_content(chunk_size=1024*1024): f.write(chunk)
                 
-                logging.info("ダウンロード完了。通知を表示します。")
-                self.show_notification()
-            else:
-                logging.info("最新の状態です。")
-        except Exception as e:
-            logging.error(f"実行エラー: {e}")
+                with open(DOWNLOADED_VER_FILE, "w") as f:
+                    f.write(self.target_version)
+                logging.info("ダウンロード完了。")
+            except Exception as e:
+                logging.error(f"ダウンロード失敗: {e}")
+                return
+
+        # 5. 通知を表示
+        self.show_notification()
 
     def show_notification(self):
-        # アプリIDをユニークなものに変更してキャッシュを回避
-        toaster = InteractableWindowsToaster('NVIDIA.Driver.Updater')
+        """ボタン付き通知を表示"""
+        # AUMIDをユニークにしてWindowsのキャッシュを回避
+        toaster = InteractableWindowsToaster('NVIDIA.Driver.Manager.Updater')
         
         new_toast = Toast()
         new_toast.text_fields = [
             f"🚀 NVIDIA ドライバ {self.target_version} の準備完了",
-            "今すぐインストールを実行しますか？"
+            "今すぐインストールを実行しますか？ (画面暗転注意)"
         ]
         
-        # ボタンの追加（スロットへ追加）
         new_toast.actions.append(ToastButton('今すぐインストール', 'install'))
         new_toast.actions.append(ToastButton('あとで', 'later'))
         
         new_toast.on_activated = self.on_toast_activated
-        
-        # 通知を表示
         toaster.show_toast(new_toast)
 
         logging.info("通知を表示しました。ユーザーの応答を待機中...")
-        # 120秒ループ
-        for i in range(120):
+        for _ in range(120):
             if self.is_installing:
                 while self.is_installing: time.sleep(1)
                 break
             time.sleep(1)
 
+    def _cleanup_temp_files(self):
+        """一時ファイル群を削除"""
+        for f in [TEMP_EXE, DOWNLOADED_VER_FILE]:
+            if os.path.exists(f):
+                try: os.remove(f)
+                except: pass
+
 if __name__ == "__main__":
-    lock_path = os.path.join(os.environ["TEMP"], "nv_updater_final_v2.lock")
+    # 多重起動防止
+    lock_path = os.path.join(os.environ["TEMP"], "nv_updater_v131_final.lock")
     if os.path.exists(lock_path):
-        if time.time() - os.path.getmtime(lock_path) < 3600: sys.exit()
+        if time.time() - os.path.getmtime(lock_path) < 3600:
+            sys.exit()
+
     with open(lock_path, "w") as f: f.write(str(os.getpid()))
     
     try:

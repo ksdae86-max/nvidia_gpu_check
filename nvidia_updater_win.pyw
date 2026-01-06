@@ -7,9 +7,10 @@ import logging
 import ctypes
 import sys
 
-# ライブラリの読み込み (v1.3.1の仕様に合わせて ToastButton を使用)
+# ライブラリの読み込み
 try:
-    from windows_toasts import WindowsToaster, Toast, ToastActivatedEventArgs, ToastButton
+    # 警告に従い InteractableWindowsToaster を追加
+    from windows_toasts import InteractableWindowsToaster, Toast, ToastActivatedEventArgs, ToastButton
 except ImportError:
     print("Required library missing: python -m pip install windows_toasts==1.3.1")
     sys.exit(1)
@@ -30,7 +31,7 @@ GITHUB_URL = "https://raw.githubusercontent.com/ksdae86-max/nvidia_gpu_check/mai
 LOG_FILE = os.path.join(BASE_DIR, "updater.log")
 VERSION_LOG = os.path.join(BASE_DIR, "installed_version.txt")
 
-# 保存先をスクリプトと同じフォルダ(C:\scrypt)に指定
+# 保存先をスクリプトと同じフォルダに指定
 TEMP_EXE = os.path.join(BASE_DIR, "nvidia_update_temp.exe")
 
 # ログ設定
@@ -77,7 +78,7 @@ class NVIDIAUpdater:
         return "0.0"
 
     def on_toast_activated(self, args: ToastActivatedEventArgs):
-        """通知ボタン「今すぐインストール」が押された時の動作"""
+        """通知ボタンが押された時の動作"""
         if args.arguments == "install":
             self.is_installing = True
             if not self.is_admin():
@@ -85,35 +86,35 @@ class NVIDIAUpdater:
                 self.is_installing = False
                 return
 
-            logging.info(f"承認されました。インストールを開始します: Ver {self.target_version}")
+            logging.info(f"承認されました。インストール開始: Ver {self.target_version}")
             try:
-                # サイレントインストール実行 (-s: Silent, -n: No Reboot, -f: Force)
+                # サイレントインストール実行
                 process = subprocess.Popen([TEMP_EXE, "-s", "-n", "-f"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 process.wait()
 
-                logging.info("インストール終了。反映待ち...")
+                logging.info("インストールプロセス終了。反映待ち(30秒)...")
                 time.sleep(30) 
 
                 actual = self.get_actual_installed_version()
                 if actual == self.target_version:
-                    logging.info(f"完了：バージョン {actual} に更新されました。")
+                    logging.info(f"成功：バージョン {actual} に更新されました。")
                     with open(VERSION_LOG, "w", encoding='utf-8') as f: f.write(self.target_version)
                     if os.path.exists(TEMP_EXE): os.remove(TEMP_EXE)
                 else:
-                    logging.warning(f"更新後のバージョンが一致しません（現在: {actual}）")
+                    logging.warning(f"更新後のバージョン不一致（現在: {actual}）")
             except Exception as e:
                 logging.error(f"インストールエラー: {e}")
             finally:
                 self.is_installing = False
 
     def check(self):
-        """メイン処理：GitHub確認 -> ダウンロード -> 通知"""
+        """メイン処理"""
         if os.path.exists(TEMP_EXE):
             try: os.remove(TEMP_EXE)
             except: pass
 
         actual_ver = self.get_actual_installed_version()
-        logging.info(f"チェック開始（自機Ver: {actual_ver}）")
+        logging.info(f"チェック開始（現在: {actual_ver}）")
 
         try:
             res = requests.get(GITHUB_URL, timeout=15)
@@ -121,20 +122,18 @@ class NVIDIAUpdater:
             
             content = res.text.strip().split(": ")
             if len(content) < 2:
-                logging.error("GitHubのファイル形式が不正です。")
+                logging.error("GitHubのファイル解析に失敗しました。")
                 return
             self.target_version = content[0]
             self.download_url = content[1]
         except Exception as e:
-            logging.error(f"GitHub接続エラー: {e}")
+            logging.error(f"GitHub取得失敗: {e}")
             return
 
         try:
-            # バージョン比較
             if float(self.target_version) > float(actual_ver):
-                logging.info(f"新バージョン発見: {self.target_version}")
-                
-                logging.info(f"ダウンロード中...")
+                logging.info(f"新バージョン検知: {self.target_version}")
+                logging.info(f"ダウンロード開始...")
                 with requests.get(self.download_url, stream=True, timeout=30) as r:
                     r.raise_for_status()
                     with open(TEMP_EXE, "wb") as f:
@@ -149,15 +148,16 @@ class NVIDIAUpdater:
             logging.error(f"実行エラー: {e}")
 
     def show_notification(self):
-        """Windows通知の生成"""
-        toaster = WindowsToaster('NVIDIA Driver Manager')
+        """インタラクティブな通知（ボタン付き）を表示"""
+        # WindowsToaster ではなく InteractableWindowsToaster を使用
+        toaster = InteractableWindowsToaster('NVIDIA Driver Manager')
         new_toast = Toast()
         new_toast.text_fields = [
-            f"🚀 NVIDIA ドライバ {self.target_version}",
-            "新しいドライバをインストールしますか？（画面暗転注意）"
+            f"🚀 NVIDIA ドライバ {self.target_version} が利用可能です。",
+            "今すぐインストールしますか？（画面暗転注意）"
         ]
         
-        # v1.3.1 仕様: ToastButton を使用
+        # ボタンの追加
         new_toast.actions.append(ToastButton('今すぐインストール', 'install'))
         new_toast.actions.append(ToastButton('あとで', 'later'))
         
@@ -167,13 +167,14 @@ class NVIDIAUpdater:
         logging.info("ユーザーの応答を待機中（最大120秒）...")
         for _ in range(120):
             if self.is_installing:
+                # インストール中は終わるまで待機
                 while self.is_installing: 
                     time.sleep(1)
                 break
             time.sleep(1)
 
 if __name__ == "__main__":
-    lock_path = os.path.join(os.environ["TEMP"], "nv_updater_v131.lock")
+    lock_path = os.path.join(os.environ["TEMP"], "nv_updater_interact.lock")
     if os.path.exists(lock_path):
         if time.time() - os.path.getmtime(lock_path) < 3600:
             sys.exit()

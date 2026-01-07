@@ -1,18 +1,18 @@
-name: Auto GPU Version Updater
+name: NVIDIA Driver Check
 
 on:
   schedule:
-    - cron: '0 0 * * *' # 毎日1回実行
-  workflow_dispatch: # 手動実行用
+    - cron: '0 0 * * *'
+  workflow_dispatch:
 
 jobs:
-  update-gpu:
+  check-driver:
     runs-on: ubuntu-latest
     permissions:
+      actions: write  # 👈 変数更新に必須
       contents: read
-      actions: write # 👈 変数を書き換えるために必須の権限
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -23,11 +23,10 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
-      - name: Run Updater
+      - name: Run check
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 自動発行されるトークン
-          # GitHubのVariablesから現在の最新バージョンを読み込む
-          CURRENT_BASE_VERSION: ${{ vars.LATEST_GPU_VERSION }}
-          # 通知用（必要に応じて）
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-        run: python gpu_updater.py
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          # GitHubのVariablesから値を読み込んで環境変数にセット
+          LATEST_GPU_VERSION: ${{ vars.LATEST_GPU_VERSION }}
+        run: python get_driver.py

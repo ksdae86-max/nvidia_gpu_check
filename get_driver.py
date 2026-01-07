@@ -1,6 +1,30 @@
 import os
 import requests
 
+def update_github_variable(new_version):
+    """GitHubのRepository VariableをAPI経由で更新する"""
+    token = os.getenv("GITHUB_TOKEN")
+    repo = os.getenv("GITHUB_REPOSITORY")
+    var_name = "LATEST_GPU_VERSION"
+    
+    if not token or not repo:
+        print("⚠️ GITHUB_TOKEN または REPOSITORY が設定されていないため変数を更新できません。")
+        return
+
+    url = f"https://api.github.com/repos/{repo}/actions/variables/{var_name}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28"
+    }
+    data = {"name": var_name, "value": str(new_version)}
+    
+    res = requests.patch(url, json=data, headers=headers)
+    if res.status_code == 204:
+        print(f"✅ GitHub Actionsの基準変数を {new_version} に更新しました。")
+    else:
+        print(f"❌ 変数更新失敗: {res.status_code} - {res.text}")
+
 def send_discord_notification(webhook_url, version, url):
     if not webhook_url: return
     payload = {
@@ -19,43 +43,34 @@ def send_discord_notification(webhook_url, version, url):
 
 def check_url_exists(url):
     try:
-        # タイムアウトを少し伸ばして安定性を確保
         res = requests.head(url, timeout=5, headers={"User-Agent": "Mozilla/5.0"})
         return res.status_code == 200
     except:
         return False
 
 def update_driver_history():
-    history_file = "driver_history.txt"
     webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
     
-    # デフォルトの開始地点
-    current_version = 0.0
-    if os.path.exists(history_file) and os.path.getsize(history_file) > 0:
-        with open(history_file, "r") as f:
-            try:
-                # 591.59: https://... の形式から数字だけ抽出
-                line = f.readline()
-                current_version = float(line.split(":")[0])
-            except:
-                current_version = 0.0
+    # GitHubのVariablesから現在の最新バージョンを取得（なければ593.0を初期値に）
+    try:
+        current_version = float(os.getenv("LATEST_GPU_VERSION", "593.00"))
+    except:
+        current_version = 593.00
 
-    print(f"Checking for updates. Current recorded version: {current_version}")
+    print(f"Checking for updates. Starting from: {current_version}")
 
     found_version = None
     found_url = None
 
-    # 現在のバージョンから +2 メジャーバージョン先までスキャン（例: 591 -> 593）
-    start_major = int(current_version) + 2 if current_version > 0 else 593
+    # 検索範囲：現在のバージョンから +2 メジャーバージョン先までスキャン
+    start_major = int(current_version) + 2
     
-    # 巨大なループになるのを防ぎつつ、効率的にスキャン
     for major in range(start_major, int(current_version) - 1, -1):
-        # メジャーバージョンが変わる時は、.99から探し始める
         for minor in range(99, -1, -1):
             v = f"{major}.{minor:02d}"
+            v_float = float(v)
             
-            # すでに持っているバージョン以下ならスキャン終了
-            if float(v) <= current_version:
+            if v_float <= current_version:
                 break
                 
             test_url = f"https://jp.download.nvidia.com/Windows/{v}/{v}-desktop-win10-win11-64bit-international-dch-whql.exe"
@@ -67,10 +82,11 @@ def update_driver_history():
         if found_version: break
 
     if found_version and float(found_version) > current_version:
-        with open(history_file, "w", encoding="utf-8") as f:
-            f.write(f"{found_version}: {found_url}\n")
-        print(f"NEW DRIVER: {found_version}")
+        print(f"NEW DRIVER FOUND: {found_version}")
+        # 1. Discordに通知
         send_discord_notification(webhook_url, found_version, found_url)
+        # 2. GitHubの変数を更新して、次回の「開始地点」を上書きする
+        update_github_variable(found_version)
     else:
         print(f"No new driver found higher than {current_version}")
 

@@ -1,37 +1,33 @@
-name: Update NVIDIA Driver History
+name: Auto GPU Version Updater
+
 on:
   schedule:
-    - cron: '0 0 * * *'
-  workflow_dispatch:
+    - cron: '0 0 * * *' # 毎日1回実行
+  workflow_dispatch: # 手動実行用
 
 jobs:
-  build:
+  update-gpu:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
+      actions: write # 👈 変数を書き換えるために必須の権限
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
+          python-version: '3.10'
+
       - name: Install dependencies
         run: pip install requests
-      - name: Prepare Git
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git pull origin main
-      - name: Run update script
+
+      - name: Run Updater
         env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: |
-          python get_driver.py
-          cat driver_history.txt
-      - name: Commit and Push
-        run: |
-          if [ -s driver_history.txt ]; then
-            git add driver_history.txt
-            git commit --allow-empty -m "Direct detection update: $(date +'%Y-%m-%d %H:%M')"
-            git push origin HEAD:main
-          fi
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 自動発行されるトークン
+          # GitHubのVariablesから現在の最新バージョンを読み込む
+          CURRENT_BASE_VERSION: ${{ vars.LATEST_GPU_VERSION }}
+          # 通知用（必要に応じて）
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: python gpu_updater.py

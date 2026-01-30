@@ -2,10 +2,7 @@ import os
 import requests
 
 def update_github_variable(formatted_value):
-    """
-    GitHubのRepository VariableをAPI経由で更新する
-    PC側(updater.py)が読み取れるよう 'バージョン: URL' の形式で保存する
-    """
+    """GitHubのRepository VariableをAPI経由で更新する"""
     token = os.getenv("GITHUB_TOKEN")
     repo = os.getenv("GITHUB_REPOSITORY")
     var_name = "LATEST_GPU_VERSION"
@@ -20,7 +17,7 @@ def update_github_variable(formatted_value):
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28"
     }
-    # PC側の split(": ") に対応する形式でデータを送る
+    # PC側の split(": ") に対応する形式で保存
     data = {"name": var_name, "value": str(formatted_value)}
 
     res = requests.patch(url, json=data, headers=headers)
@@ -55,10 +52,9 @@ def check_url_exists(url):
 def update_driver_history():
     webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
 
-    # 変数から取得 (PC側の split 仕様に合わせた形式で格納されていることを想定)
+    # 変数から取得 (PC側の split 仕様に合わせた形式を想定)
     raw_var = os.getenv("LATEST_GPU_VERSION", "593.00")
     try:
-        # 変数の中身が '560.70: http...' の形式なら数値部分だけ抽出して比較
         current_version = float(raw_var.split(": ")[0])
     except:
         current_version = 593.00
@@ -88,13 +84,19 @@ def update_driver_history():
 
     if found_version and float(found_version) > current_version:
         print(f"NEW DRIVER FOUND: {found_version}")
-        
+
         # 1. Discordに通知
         send_discord_notification(webhook_url, found_version, found_url)
-        
-        # 2. PC側(updater.py)が期待する 'バージョン: URL' フォーマットでGitHub変数を更新
+
+        # 2. PC側(updater.py)が期待するフォーマット作成
         formatted_value = f"{found_version}: {found_url}"
+        
+        # 3. GitHub変数を更新
         update_github_variable(formatted_value)
+
+        # 4. 【追加】リポジトリ上のファイル(driver_history.txt)も更新
+        with open("driver_history.txt", "w", encoding="utf-8") as f:
+            f.write(formatted_value)
     else:
         print(f"No new driver found higher than {current_version}")
 

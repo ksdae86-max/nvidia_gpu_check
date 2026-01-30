@@ -1,12 +1,15 @@
 import os
 import requests
 
-def update_github_variable(new_version):
-    """GitHubのRepository VariableをAPI経由で更新する"""
+def update_github_variable(formatted_value):
+    """
+    GitHubのRepository VariableをAPI経由で更新する
+    PC側(updater.py)が読み取れるよう 'バージョン: URL' の形式で保存する
+    """
     token = os.getenv("GITHUB_TOKEN")
     repo = os.getenv("GITHUB_REPOSITORY")
     var_name = "LATEST_GPU_VERSION"
-    
+
     if not token or not repo:
         print("⚠️ GITHUB_TOKEN または REPOSITORY が設定されていないため変数を更新できません。")
         return
@@ -17,11 +20,12 @@ def update_github_variable(new_version):
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28"
     }
-    data = {"name": var_name, "value": str(new_version)}
-    
+    # PC側の split(": ") に対応する形式でデータを送る
+    data = {"name": var_name, "value": str(formatted_value)}
+
     res = requests.patch(url, json=data, headers=headers)
     if res.status_code == 204:
-        print(f"✅ GitHub Actionsの基準変数を {new_version} に更新しました。")
+        print(f"✅ GitHub Actionsの基準変数を更新しました: {formatted_value}")
     else:
         print(f"❌ 変数更新失敗: {res.status_code} - {res.text}")
 
@@ -50,10 +54,12 @@ def check_url_exists(url):
 
 def update_driver_history():
     webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
-    
-    # GitHubのVariablesから現在の最新バージョンを取得（なければ593.0を初期値に）
+
+    # 変数から取得 (PC側の split 仕様に合わせた形式で格納されていることを想定)
+    raw_var = os.getenv("LATEST_GPU_VERSION", "593.00")
     try:
-        current_version = float(os.getenv("LATEST_GPU_VERSION", "593.00"))
+        # 変数の中身が '560.70: http...' の形式なら数値部分だけ抽出して比較
+        current_version = float(raw_var.split(": ")[0])
     except:
         current_version = 593.00
 
@@ -62,19 +68,18 @@ def update_driver_history():
     found_version = None
     found_url = None
 
-    # 検索範囲：現在のバージョンから +2 メジャーバージョン先までスキャン
     start_major = int(current_version) + 2
-    
+
     for major in range(start_major, int(current_version) - 1, -1):
         for minor in range(99, -1, -1):
             v = f"{major}.{minor:02d}"
             v_float = float(v)
-            
+
             if v_float <= current_version:
                 break
-                
+
             test_url = f"https://jp.download.nvidia.com/Windows/{v}/{v}-desktop-win10-win11-64bit-international-dch-whql.exe"
-            
+
             if check_url_exists(test_url):
                 found_version = v
                 found_url = test_url
@@ -83,10 +88,13 @@ def update_driver_history():
 
     if found_version and float(found_version) > current_version:
         print(f"NEW DRIVER FOUND: {found_version}")
+        
         # 1. Discordに通知
         send_discord_notification(webhook_url, found_version, found_url)
-        # 2. GitHubの変数を更新して、次回の「開始地点」を上書きする
-        update_github_variable(found_version)
+        
+        # 2. PC側(updater.py)が期待する 'バージョン: URL' フォーマットでGitHub変数を更新
+        formatted_value = f"{found_version}: {found_url}"
+        update_github_variable(formatted_value)
     else:
         print(f"No new driver found higher than {current_version}")
 

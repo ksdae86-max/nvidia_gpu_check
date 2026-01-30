@@ -9,8 +9,8 @@ jobs:
   check-driver:
     runs-on: ubuntu-latest
     permissions:
-      actions: write  # 👈 変数更新に必須
-      contents: read
+      actions: write  # 変数更新用
+      contents: write # 👈 ファイルのコミット・プッシュに必須
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,7 +26,18 @@ jobs:
       - name: Run check
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }} # 👈 API実行に必要
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          # GitHubのVariablesから値を読み込んで環境変数にセット
           LATEST_GPU_VERSION: ${{ vars.LATEST_GPU_VERSION }}
         run: python get_driver.py
+
+      # --- 【追加】変更されたファイルをリポジトリに反映 ---
+      - name: Commit and Push changes
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          if [ -f driver_history.txt ]; then
+            git add driver_history.txt
+            git commit -m "Update driver_history.txt via GitHub Actions" || exit 0
+            git push
+          fi

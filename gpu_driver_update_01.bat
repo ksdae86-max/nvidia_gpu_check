@@ -8,8 +8,8 @@ if not exist "%DOWNLOAD_DIR%" mkdir "%DOWNLOAD_DIR%"
 :: 2. Gemini CLIからURLを取得（パイプを使用してインタラクティブシェルに対応）
 echo [NVIDIA] 最新のドライバー情報をチェックしています...
 
-:: Gemini CLIへプロンプトを送信（パイプを使用）
-echo https://www.nvidia.com/ja-jp/geforce/drivers/ にアクセスし、グラフィックボード（RTX 4060）向けの最新ドライバーダウンロードURLを抽出してください。URLのみを返してください。 | gemini > "%DOWNLOAD_DIR%\gemini_output.txt"
+:: Gemini CLIへプロンプトを送信（Game Ready Driverに限定）
+echo https://www.nvidia.com/ja-jp/geforce/drivers/ にアクセスし、Game Ready Driver（ゲーム用ドライバー）のみを対象に、グラフィックボード RTX 4060 向けの最新版のダウンロードURLを抽出してください。URLのみを返してください。 | gemini > "%DOWNLOAD_DIR%\gemini_output.txt"
 
 :: ファイルから取得したURLを読み込む
 if exist "%DOWNLOAD_DIR%\gemini_output.txt" (

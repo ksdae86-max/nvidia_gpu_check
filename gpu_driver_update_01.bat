@@ -1,6 +1,9 @@
 @echo off
 setlocal enabledelayedexpansion
 
+:: 【超重要】管理者実行時のカレントディレクトリをバッチの場所に変更
+cd /d "%~dp0"
+
 :: 管理者権限チェック
 net session >nul 2>&1
 if %errorlevel% neq 0 (

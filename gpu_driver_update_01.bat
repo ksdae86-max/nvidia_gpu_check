@@ -5,14 +5,19 @@ setlocal enabledelayedexpansion
 set "DOWNLOAD_DIR=D:\NvidiaUpdate"
 if not exist "%DOWNLOAD_DIR%" mkdir "%DOWNLOAD_DIR%"
 
-:: 2. Gemini CLIからURLを取得（Game Ready Driverを選択するようロジックを厳格化）
+:: 2. Gemini CLIからURLを取得（パイプを使用してインタラクティブシェルに対応）
 echo [NVIDIA] 最新のドライバー情報をチェックしています...
-for /f "delims=" %%i in ('gemini "https://www.nvidia.com/ja-jp/geforce/drivers/ にアクセスし、グラフィックボード（RTX 4060）向けの最新ドライバーを探してください。ドライバーには『Game Ready』と『Studio』の2種類がありますが、必ず『Game Ready Driver』を選択してください。その上で、対応する『us.download.nvidia.comから始まる.exeの直リンクURL』を1行だけで出力してください。解説やマークダウン（```）は絶対に含めないでください。"') do (
-    set "URL=%%i"
+
+:: Gemini CLIへプロンプトを送信（パイプを使用）
+echo https://www.nvidia.com/ja-jp/geforce/drivers/ にアクセスし、グラフィックボード（RTX 4060）向けの最新ドライバーダウンロードURLを抽出してください。URLのみを返してください。 | gemini > "%DOWNLOAD_DIR%\gemini_output.txt"
+
+:: ファイルから取得したURLを読み込む
+if exist "%DOWNLOAD_DIR%\gemini_output.txt" (
+    set /p URL=<"%DOWNLOAD_DIR%\gemini_output.txt"
 )
 
 :: 3. 取得したURLが有効な場合、画面をクリアして指定のメッセージを表示
-if not "%URL%"=="" (
+if not "!URL!"=="" (
     cls
     echo ===================================================
     echo       ★ GPUドライバー更新中... (自動処理中) ★
@@ -21,8 +26,8 @@ if not "%URL%"=="" (
     echo    そのまましばらくお待ちください...
     echo.
 
-    :: 4. curlの進捗を非表示(--silent)にしてバックグラウンドダウンロード
-    curl -s -L -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" "!URL!" -o "%DOWNLOAD_DIR%\driver.exe"
+    :: 4. curlでダウンロード（Windows 10 1803以降なら組み込み）
+    curl -L -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" "!URL!" -o "%DOWNLOAD_DIR%\driver.exe"
     
     :: 5. サイレントインストールを実行（完全同期処理）
     if exist "%DOWNLOAD_DIR%\driver.exe" (
@@ -42,6 +47,9 @@ if not "%URL%"=="" (
         echo [エラー] ファイルのダウンロードに失敗しました。
         pause
     )
+    
+    :: 一時ファイルを削除
+    del "%DOWNLOAD_DIR%\gemini_output.txt"
 ) else (
     echo [%date% %time%] Gemini CLIからのURL取得失敗 >> "%DOWNLOAD_DIR%\update_log.txt"
     echo [エラー] 最新ドライバーのURLが取得できませんでした。

@@ -13,7 +13,7 @@ if (-not (Test-Path $regPath)) {
 # ==========================================
 # 1. Wingetで最新バージョンの検出
 # ==========================================
-$upgradeInfo = winget upgrade --id $packageId --accept-source-agreements --accept-package-agreements | Out-String
+$upgradeInfo = winget upgrade --id $packageId --source winget --accept-source-agreements --accept-package-agreements | Out-String
 
 # パッケージIDが含まれていない場合は即終了
 if ($upgradeInfo -notmatch [regex]::Escape($packageId)) {
@@ -22,10 +22,11 @@ if ($upgradeInfo -notmatch [regex]::Escape($packageId)) {
 
 # 検出結果行から最新バージョン番号を取得
 $latestVersion = ""
-$matchingLine = ($upgradeInfo -split "`r?\n") | Where-Object { $_ -match [regex]::Escape($packageId) }
+$matchingLine = ($upgradeInfo -split "`r?\n") | Where-Object { $_ -match [regex]::Escape($packageId) } | Select-Object -First 1
 
 if ($matchingLine) {
-    if ($matchingLine -match '\s+(\S+)\s+(\S+)\s*$') {
+    # パッケージIDの直後にある2つのバージョン文字列（現在Ver / 利用可能Ver）から後者を抽出
+    if ($matchingLine -match "$([regex]::Escape($packageId))\s+(\S+)\s+(\S+)") {
         $latestVersion = $matches[2].Trim()
     }
 }
@@ -117,14 +118,19 @@ $form.Dispose()
 # ==========================================
 switch ($result) {
     "OK" {
-        # 進捗画面表示 ➔ Winget更新 ➔ キャッシュ自動削除 ➔ 完了画面表示
+        # 進捗画面表示 ➔ Winget更新 ➔ 一時キャッシュ削除 ➔ 結果ダイアログ表示
         $cmdText = "Write-Host 'GPUドライバーの更新処理を開始します。そのままお待ちください...' -ForegroundColor Cyan; " +
-                   "winget upgrade --id '$packageId' --scope machine --accept-source-agreements --accept-package-agreements; " +
-                   "winget settings --purge; " +
+                   "winget upgrade --id '$packageId' --scope machine --source winget --accept-source-agreements --accept-package-agreements; " +
+                   "`$exitCode = `$LASTEXITCODE; " +
+                   "Remove-Item -Path `"`$env:TEMP\WinGet\*`" -Recurse -Force -ErrorAction SilentlyContinue; " +
                    "Add-Type -AssemblyName System.Windows.Forms; " +
-                   "[System.Windows.Forms.MessageBox]::Show('GPUドライバーの更新が正常に完了しました。', '更新完了', 'OK', 'Information');"
+                   "if (`$exitCode -eq 0) { " +
+                   "  [System.Windows.Forms.MessageBox]::Show('GPUドライバーの更新が正常に完了しました。', '更新完了', 'OK', 'Information'); " +
+                   "} else { " +
+                   "  [System.Windows.Forms.MessageBox]::Show('更新が中断されたか、エラーが発生しました。(Code: ' + `$exitCode + ')', '更新エラー', 'OK', 'Warning'); " +
+                   "}"
 
-        Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -NoExit -Command `"$cmdText`"" -Verb RunAs
+        Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$cmdText`"" -Verb RunAs
 
         # 既存のスヌーズ・拒否フラグを初期化
         Remove-ItemProperty -Path $regPath -Name "SnoozeUntil" -ErrorAction SilentlyContinue

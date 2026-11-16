@@ -13,6 +13,11 @@ if (-not (Test-Path $regPath)) {
 # ==========================================
 # 1. Wingetで最新バージョンの検出
 # ==========================================
+# 非表示実行時の横幅切り詰め（…によるパッケージID省略）を防止
+try {
+    $Host.UI.RawUI.BufferSize = New-Object System.Management.Automation.Host.Size(250, 3000)
+} catch {}
+
 $upgradeInfo = winget upgrade --id $packageId --source winget --accept-source-agreements --accept-package-agreements | Out-String
 
 # パッケージIDが含まれていない場合は即終了
@@ -118,23 +123,27 @@ $form.Dispose()
 # ==========================================
 switch ($result) {
     "OK" {
-        # 進捗画面表示 ➔ Winget更新 ➔ 一時キャッシュ削除 ➔ 結果ダイアログ表示
+        # 進捗画面表示 ➔ Winget更新 ➔ 一時キャッシュ削除 ➔ 最前面で結果ダイアログ表示
         $cmdText = "Write-Host 'GPUドライバーの更新処理を開始します。そのままお待ちください...' -ForegroundColor Cyan; " +
                    "winget upgrade --id '$packageId' --scope machine --source winget --accept-source-agreements --accept-package-agreements; " +
                    "`$exitCode = `$LASTEXITCODE; " +
                    "Remove-Item -Path `"`$env:TEMP\WinGet\*`" -Recurse -Force -ErrorAction SilentlyContinue; " +
                    "Add-Type -AssemblyName System.Windows.Forms; " +
                    "if (`$exitCode -eq 0) { " +
-                   "  [System.Windows.Forms.MessageBox]::Show('GPUドライバーの更新が正常に完了しました。', '更新完了', 'OK', 'Information'); " +
+                   "  [System.Windows.Forms.MessageBox]::Show('GPUドライバーの更新が正常に完了しました。', '更新完了', 'OK', 'Information', 'Button1', 'DefaultDesktopOnly'); " +
                    "} else { " +
-                   "  [System.Windows.Forms.MessageBox]::Show('更新が中断されたか、エラーが発生しました。(Code: ' + `$exitCode + ')', '更新エラー', 'OK', 'Warning'); " +
+                   "  [System.Windows.Forms.MessageBox]::Show('更新が中断されたか、エラーが発生しました。(Code: ' + `$exitCode + ')', '更新エラー', 'OK', 'Warning', 'Button1', 'DefaultDesktopOnly'); " +
                    "}"
 
-        Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$cmdText`"" -Verb RunAs
+        try {
+            Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$cmdText`"" -Verb RunAs
 
-        # 既存のスヌーズ・拒否フラグを初期化
-        Remove-ItemProperty -Path $regPath -Name "SnoozeUntil" -ErrorAction SilentlyContinue
-        Remove-ItemProperty -Path $regPath -Name "IgnoredVersion" -ErrorAction SilentlyContinue
+            # 昇格が承認された場合のみ、既存のスヌーズ・拒否フラグを初期化
+            Remove-ItemProperty -Path $regPath -Name "SnoozeUntil" -ErrorAction SilentlyContinue
+            Remove-ItemProperty -Path $regPath -Name "IgnoredVersion" -ErrorAction SilentlyContinue
+        } catch {
+            # UAC（管理者権限昇格）がキャンセルされた場合はフラグを残したまま静かに終了
+        }
     }
     "Retry" {
         # 【スヌーズ】7日後の日時をISO8601形式でレジストリに登録
